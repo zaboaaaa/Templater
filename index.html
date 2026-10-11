@@ -181,7 +181,7 @@ details ul { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 4px; }
           </span>
         </div>
         <div class="tset" id="tset"></div>
-        <p class="hint">色付きのマスであっても計算に影響はしません。</p>
+        <p class="hint" id="ed-hint">色付きのマスであっても計算に影響はしません。</p>
       </section>
     </div>
 
@@ -1367,7 +1367,7 @@ if (typeof module !== 'undefined') module.exports = { solveTsd, genOrders, solve
       $('page-' + n).hidden = name !== n;
       $('nav-' + n).setAttribute('aria-selected', name === n ? 'true' : 'false');
     });
-    if (name === 'pc' || name === 'setup') { swapCtx(name); $('slot-' + name).appendChild($('edcard')); $('edcard').classList.toggle('pc-mode', name === 'pc'); }
+    if (name === 'pc' || name === 'setup') { swapCtx(name); $('slot-' + name).appendChild($('edcard')); $('edcard').classList.toggle('pc-mode', name === 'pc'); $('ed-hint').textContent = name === 'pc' ? '色付きのマスであっても計算に影響はしません。' : '灰色は最初からある地形、色付きは組み立てるミノです。同じ色を再度クリックすると消えます。ドラッグで連続して置けます。'; }
     try { localStorage.setItem('pc-tool-page', name); } catch (e) {}
     if (name === 'tsd') redrawT(); else redrawEditor();
   }
