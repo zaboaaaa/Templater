@@ -1,0 +1,1790 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Templater</title>
+<style>
+/* レイアウト: 左に地形エディタ(固定)、右に操作と結果。狭い幅では縦積み */
+:root {
+  --bg: #eef1f4; --surface: #ffffff; --surface2: #f4f6f8; --ink: #141b22; --muted: #5a6672; --line: #d3dae1;
+  --accent: #0a6c7d; --accent-ink: #ffffff; --good: #1a7f45; --warn: #8a5300; --err: #b3261e;
+  --field: #0d1319; --grid: #1d2a35;
+  --f-display: "DotGothic16", "Zen Kaku Gothic New", system-ui, sans-serif;
+  --f-body: "Zen Kaku Gothic New", system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1015; --surface: #141b22; --surface2: #1b2430; --ink: #e7edf2; --muted: #93a1ae; --line: #27323d;
+    --accent: #4fc3d4; --accent-ink: #06222a; --good: #4cc47c; --warn: #e0a13a; --err: #f27c74;
+    --field: #080c10; --grid: #1a2530; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b1015; --surface: #141b22; --surface2: #1b2430; --ink: #e7edf2; --muted: #93a1ae; --line: #27323d;
+  --accent: #4fc3d4; --accent-ink: #06222a; --good: #4cc47c; --warn: #e0a13a; --err: #f27c74;
+  --field: #080c10; --grid: #1a2530; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.6; padding-inline: 16px; padding-block: 20px 40px; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 1120px; margin: 0 auto; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 16px; }
+h1 { font-family: var(--f-display); font-weight: 400; font-size: 28px; margin: 0; letter-spacing: .04em; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); font-size: 13px; }
+.app { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .sticky { position: static !important; } }
+.col { display: grid; gap: 16px; min-width: 0; }
+.sticky { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; min-width: 0; }
+h2 { font-size: 13px; font-weight: 700; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+.label { font-size: 12px; color: var(--muted); }
+
+/* パレット */
+.palette { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.pal { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface2); border-radius: 4px; padding: 4px 8px; font-family: var(--f-mono); font-size: 13px; min-height: 32px; }
+.pal i { width: 14px; height: 14px; border-radius: 2px; display: block; border: 1px solid rgba(0,0,0,.25); }
+.pal[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); background: var(--surface); }
+.pal.erase i { background: repeating-linear-gradient(45deg, var(--line) 0 3px, transparent 3px 6px); }
+.fieldbox { background: var(--field); padding: 8px; border-radius: 4px; display: inline-block; max-width: 100%; line-height: 0; }
+#editor { display: block; width: 280px; max-width: 100%; height: auto; touch-action: none; cursor: crosshair; }
+.edmeta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 10px; align-items: center; }
+.edmeta .label { font-family: var(--f-mono); font-size: 12px; }
+.btn { border: 1px solid var(--line); background: var(--surface2); border-radius: 4px; padding: 6px 12px; min-height: 36px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn[disabled] { opacity: .55; cursor: progress; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.tab { min-width: 40px; min-height: 36px; border: 1px solid var(--line); background: var(--surface2); border-radius: 4px; padding: 4px 12px; font-family: var(--f-mono); font-weight: 600; }
+.tab[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.tset { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.tset .chips button { font-family: var(--f-mono); font-size: 13px; border: 1px solid var(--line); background: var(--surface2); border-radius: 4px; min-height: 32px; padding: 2px 10px; }
+.tset .chips button[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); background: var(--surface); }
+.tset .chips { gap: 6px; }
+.tset .check { margin-top: 0; }
+.holds { display: flex; flex-wrap: wrap; gap: 6px; }
+.holds button { font-family: var(--f-mono); font-size: 13px; border: 1px solid var(--line); background: var(--surface2); border-radius: 4px; min-height: 34px; padding: 2px 12px; }
+.holds button[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); background: var(--surface); }
+.fold { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.fold > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 2px 10px 2px 4px; border-radius: 4px; user-select: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "+"; display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface2); font-family: var(--f-mono); font-size: 14px; line-height: 1; color: var(--ink); }
+.fold[open] > summary::before { content: "\2212"; }
+.fold > summary:hover { color: var(--ink); }
+.fold > .foldbody { padding-top: 6px; }
+.fieldbox canvas { touch-action: none; }
+.compact-on .plist, .compact-on .tsdcards { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.compact-on .pcard, .compact-on .tcard { padding: 0; border: 0; background: none; gap: 0; }
+.compact-on .pcard > :not(.field), .compact-on .tcard > :not(.field) { display: none; }
+.viewtoggle { margin: 0 0 12px; }
+.pc-mode .tset, .pc-mode #tabs { display: none; }
+.mainnav { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.mainnav button { border: 0; border-bottom: 3px solid transparent; background: none; padding: 8px 14px; font-weight: 700; color: var(--muted); min-height: 44px; white-space: nowrap; margin-bottom: -1px; }
+.mainnav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.mainnav button:hover { color: var(--ink); }
+.tsdcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 10px; }
+.tcard { border: 1px solid var(--line); border-radius: 4px; padding: 10px; background: var(--surface2); display: grid; gap: 8px; justify-items: start; min-width: 0; }
+.tcard .field { background: var(--field); border-radius: 3px; padding: 6px; line-height: 0; max-width: 100%; overflow-x: auto; }
+.tcard .field canvas { display: block; }
+.tcard .pct { font-family: var(--f-mono); font-weight: 600; font-size: 18px; }
+.sect { margin: 18px 0 8px; font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: .08em; }
+.sect:first-of-type { margin-top: 0; }
+.sub2 { font-size: 13px; color: var(--muted); margin: 2px 0 8px; }
+.sub2 b { color: var(--ink); font-family: var(--f-mono); font-weight: 600; }
+.hint { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+
+/* 使用ミノ */
+.minos { display: flex; flex-wrap: wrap; gap: 6px; }
+.mino { position: relative; }
+.mino input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.mino span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface2); border-radius: 4px; padding: 4px 10px; font-family: var(--f-mono); font-weight: 600; min-height: 36px; opacity: .55; }
+.mino span i { width: 14px; height: 14px; border-radius: 2px; display: block; border: 1px solid rgba(0,0,0,.25); }
+.mino input:checked + span { opacity: 1; border-color: var(--ink); background: var(--surface); }
+.mino input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 14px; }
+.actions .btn { min-height: 44px; font-size: 15px; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin-top: 12px; color: var(--muted); }
+.check input { margin-top: 4px; }
+details { margin-top: 12px; font-size: 13px; color: var(--muted); }
+details summary { cursor: pointer; }
+details ul { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 4px; }
+
+/* 結果 */
+.status { display: none; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin-top: 12px; flex-wrap: wrap; }
+.status.on { display: flex; }
+.btn[hidden] { display: none !important; }
+.spin { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: sp .8s linear infinite; }
+@keyframes sp { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+.res { display: none; }
+.res.on { display: block; }
+.big { font-family: var(--f-display); font-size: 56px; line-height: 1.05; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+.big small { font-size: 28px; margin-left: 2px; }
+.kpis { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 6px 0 10px; color: var(--muted); font-size: 13px; }
+.kpis b { color: var(--ink); font-family: var(--f-mono); font-weight: 600; }
+.meter { height: 8px; background: var(--surface2); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.meter > div { height: 100%; background: var(--accent); }
+.warn { color: var(--warn); font-size: 13px; margin: 8px 0 0; }
+.errmsg { color: var(--err); font-size: 14px; margin: 4px 0 0; }
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; margin: 18px 0 10px; }
+.mode { border: 1px solid var(--line); background: var(--surface2); border-radius: 4px; padding: 6px 8px; text-align: left; min-height: 52px; display: grid; gap: 0; align-content: center; }
+.mode b { font-size: 14px; }
+.mode span { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.mode[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.mode[aria-pressed="true"] span { color: var(--accent-ink); opacity: .85; }
+.mode[disabled] { opacity: .45; cursor: not-allowed; }
+.modeinfo { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+.modeinfo b { color: var(--ink); font-family: var(--f-mono); font-weight: 600; }
+.plist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: 10px; }
+.pcard { border: 1px solid var(--line); border-radius: 4px; padding: 10px; background: var(--surface2); display: grid; gap: 8px; min-width: 0; align-content: start; }
+.pcard .field { background: var(--field); border-radius: 3px; padding: 6px; line-height: 0; justify-self: start; max-width: 100%; overflow-x: auto; }
+.pcard .field canvas { display: block; }
+.pcard .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.pcard .pct { font-family: var(--f-mono); font-weight: 600; font-size: 16px; }
+.pcard .sub { font-size: 12px; color: var(--muted); }
+.seq { font-family: var(--f-mono); font-size: 13px; overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-family: var(--f-mono); font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); }
+.empty { color: var(--muted); font-size: 14px; padding: 16px 0; }
+.more { margin-top: 12px; }
+.sep { height: 1px; background: var(--line); margin: 16px 0; border: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Templater</h1>
+    <p>テトリスのテンプレを扱うツール。テト譜で地形を描いて、パフェ率・セットアップ率・TSD補完を計算します</p>
+  </header>
+
+  <nav class="mainnav" role="tablist" aria-label="ページ">
+    <button type="button" role="tab" id="nav-pc" aria-selected="true" aria-controls="page-pc">パフェ率</button>
+    <button type="button" role="tab" id="nav-setup" aria-selected="false" aria-controls="page-setup">セットアップ率</button>
+    <button type="button" role="tab" id="nav-tsd" aria-selected="false" aria-controls="page-tsd">TSD補完</button>
+  </nav>
+
+  <div id="page-pc" role="tabpanel" aria-labelledby="nav-pc">
+  <div class="app">
+    <div class="col sticky" id="slot-pc">
+      <section class="card" id="edcard" aria-labelledby="h-ed">
+        <h2 id="h-ed">対象の地形</h2>
+        <div class="tabs" id="tabs" role="group" aria-label="地形の切り替え"></div>
+        <div class="palette" id="palette" role="group" aria-label="ブロックの種類"></div>
+        <div class="fieldbox"><canvas id="editor" aria-label="地形エディタ。クリックまたはドラッグでブロックを置きます"></canvas></div>
+        <div class="edmeta">
+          <span class="label" id="edcount"></span>
+          <span class="row">
+            <button class="btn" id="btn-sample" type="button">サンプル</button>
+            <button class="btn" id="btn-clear" type="button">全消去</button>
+          </span>
+        </div>
+        <div class="tset" id="tset"></div>
+        <p class="hint">色付きのマスであっても計算に影響はしません。</p>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card" aria-labelledby="h-calc">
+        <h2 id="h-calc">パフェ率の計算</h2>
+        <div class="label" style="margin-bottom:6px">使用ミノ(パフェ率で並びを数える対象)</div>
+        <div class="row" style="justify-content:space-between">
+          <div class="minos" id="minos"></div>
+          <span class="row"><button class="btn" id="m-all" type="button">全選択</button></span>
+        </div>
+        <div class="label" style="margin:14px 0 6px">初期ホールド(最初からホールドにあるミノ)</div>
+        <div class="holds" id="holds" role="group" aria-label="初期ホールド"></div>
+        <div class="actions">
+          <button class="btn primary" id="btn-pc" type="button">パフェ率を計算</button>
+        </div>
+        <div class="status" id="status" role="status"><span class="spin" aria-hidden="true"></span><span class="smsg">計算中…</span><button class="btn cancel" type="button">中止</button></div>
+        <details>
+          <summary>ルールと計算の前提</summary>
+          <ul>
+            <li>SRS、ホールドは1つ(最初は空)、回転は左右90°のみ、空中設置なし。壁蹴りとTスピンも判定します。</li>
+            <li>パフェ率: 描いた地形(灰色と色付きすべて)から、選んだミノの全並び(選択数の階乗)のうち、パフェを取れる並びの割合です。</li>
+            <li>パフェの形は、途中のライン消去も考慮します。消去後に置いたミノは絵の上で上下に分かれて見えることがあり、そのパターンには「分断あり」と表示します。</li>
+            <li>初期ホールド: 最初からホールドにあるミノです。パフェ率では、そのミノも使えるミノとして加わります(同じミノが2つ使えることがあります)。</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="card res" id="res-pc" aria-live="polite"></section>
+    </div>
+  </div>
+  </div>
+
+  <div id="page-setup" role="tabpanel" aria-labelledby="nav-setup" hidden>
+  <div class="app">
+    <div class="col sticky" id="slot-setup"></div>
+    <div class="col">
+      <section class="card" aria-labelledby="h-calc-s">
+        <h2 id="h-calc-s">セットアップ率の計算</h2>
+        <div class="label" style="margin:0 0 6px">初期ホールド(最初からホールドにあるミノ)</div>
+        <div class="holds" id="holds-s" role="group" aria-label="初期ホールド"></div>
+        <div class="actions">
+          <button class="btn primary" id="btn-setup" type="button">セットアップ率を計算</button>
+        </div>
+        <label class="check"><input type="checkbox" id="lenient" checked><span>組み立てに使わないミノは、置き場所を固定しなくても必ず処理できるものとする</span></label>
+        <div class="status" id="status3" role="status"><span class="spin" aria-hidden="true"></span><span class="smsg">計算中…</span><button class="btn cancel" type="button">中止</button></div>
+        <details>
+          <summary>ルールと計算の前提</summary>
+          <ul>
+            <li>SRS、ホールドは1つ(最初は空)、回転は左右90°のみ、空中設置なし。壁蹴りとTスピンも判定します。</li>
+            <li>セットアップ率: 灰色の地形の上に、色付きの各ミノを描いた位置に置ける確率です。7種1巡の全並び(5040通り)で数えます。途中でラインが揃う絵も扱えます。</li>
+            <li>ハードドロップのみ: 置くミノの真上に地形やブロックがなく、上からそのまま落として置ける場合だけを数えた確率です。</li>
+            <li>同じミノを2つ使う場合は、そのミノの色で8マス分を描き、初期ホールドをそのミノにしてください(8マスの分け方は自動で探します)。</li>
+            <li>複数の地形にチェックを入れると、どれか1つ以上組める確率を合算して計算します。</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="card res" id="res-setup" aria-live="polite"></section>
+    </div>
+  </div>
+  </div>
+
+  <div id="page-tsd" role="tabpanel" aria-labelledby="nav-tsd" hidden>
+    <div class="app">
+      <div class="col sticky">
+        <section class="card" aria-labelledby="h-ted">
+          <h2 id="h-ted">初期地形</h2>
+          <div class="palette" id="tpalette" role="group" aria-label="ブロックの種類"></div>
+          <div class="fieldbox"><canvas id="ted" aria-label="地形エディタ。クリックまたはドラッグでブロックを置きます"></canvas></div>
+          <div class="edmeta">
+            <span class="label" id="tedcount"></span>
+            <span class="row">
+              <button class="btn" id="tsd-sample" type="button">サンプル</button>
+              <button class="btn" id="tsd-clear" type="button">全消去</button>
+            </span>
+          </div>
+        </section>
+      </div>
+      <div class="col">
+        <section class="card" aria-labelledby="h-tcalc">
+          <h2 id="h-tcalc">TSD補完</h2>
+          <p class="hint" style="margin:0 0 12px">描いた地形(灰色)に、T以外の6ミノ(I J L O S Z)を置き、Tをホールドしたまま TSD を撃てる地形を列挙します。色付きで描いたミノ(1つ4マス)はその位置に固定され、残りのミノだけを探索します。「✕ 埋めない」を置いたマス(何マスでも可)には、どのミノも置かず空きのままにします(✕のある段はTSDで消せません)。固定ミノも「置ける」ことが条件に含まれ、確率にも反映されます。</p>
+          <div class="row">
+            <label class="label" for="tsd-h">高さ上限</label>
+            <select id="tsd-h" class="btn" style="padding-inline:8px"></select>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="label" for="tsd-row">TSDで消す2ライン</label>
+            <select id="tsd-row" class="btn" style="padding-inline:8px"></select>
+          </div>
+          <div class="actions"><button class="btn primary" id="btn-tsd" type="button">TSD地形を探索</button><button class="btn" id="btn-tsd-more" type="button" disabled>続きを探索</button><button class="btn" id="btn-tsd-auto" type="button" disabled>自動で最後まで探索</button></div>
+          <div class="status" id="status2" role="status"><span class="spin" aria-hidden="true"></span><span class="smsg">計算中…</span><button class="btn" id="btn-auto-off" type="button" hidden>自動追加を止める</button><button class="btn cancel" type="button">中止</button></div>
+        </section>
+        <section class="card res" id="res-tsd" aria-live="polite"></section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="text/plain" id="engine">
+'use strict';
+/* パフェ率ツール 計算エンジン (SRS / ホールド1つ / 左右90°回転のみ / 空中設置なし) */
+const TYPES = 'IJLOSTZ';
+const BASE = {
+  I: ['....', 'XXXX', '....', '....'],
+  J: ['X..', 'XXX', '...'],
+  L: ['..X', 'XXX', '...'],
+  O: ['XX', 'XX'],
+  S: ['.XX', 'XX.', '...'],
+  T: ['.X.', 'XXX', '...'],
+  Z: ['XX.', '.XX', '...'],
+};
+function rotMat(m) {
+  const N = m.length, o = [];
+  for (let r = 0; r < N; r++) { let s = ''; for (let c = 0; c < N; c++) s += m[N - 1 - c][r]; o.push(s); }
+  return o;
+}
+const SHAPES = {};
+for (const t of TYPES) {
+  let m = BASE[t]; SHAPES[t] = [];
+  for (let r = 0; r < 4; r++) {
+    const cells = [];
+    for (let row = 0; row < m.length; row++) for (let c = 0; c < m.length; c++) if (m[row][c] === 'X') cells.push([c, m.length - 1 - row]);
+    SHAPES[t].push(cells); m = rotMat(m);
+  }
+}
+const KJ = {
+  '0>1': [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]], '1>0': [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+  '1>2': [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]], '2>1': [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+  '2>3': [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]], '3>2': [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+  '3>0': [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]], '0>3': [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+};
+const KI = {
+  '0>1': [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]], '1>0': [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]],
+  '1>2': [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]], '2>1': [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]],
+  '2>3': [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]], '3>2': [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]],
+  '3>0': [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]], '0>3': [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]],
+};
+
+function popcnt(x) {
+  x = x - ((x >>> 1) & 0x55555555); x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+  return (((x + (x >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+function perms(arr) {
+  const res = [], a = arr.slice();
+  (function rec(i) {
+    if (i === a.length) { res.push(a.join('')); return; }
+    for (let j = i; j < a.length; j++) { [a[i], a[j]] = [a[j], a[i]]; rec(i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+  })(0);
+  return res.sort();
+}
+
+function hit(rows, cells, px, py) {
+  for (let i = 0; i < 4; i++) {
+    const x = px + cells[i][0], y = py + cells[i][1];
+    if (x < 0 || x > 9 || y < 0) return true;
+    if (y < rows.length && ((rows[y] >> x) & 1)) return true;
+  }
+  return false;
+}
+function occ(rows, x, y) {
+  if (x < 0 || x > 9 || y < 0) return true;
+  return y < rows.length && ((rows[y] >> x) & 1) === 1;
+}
+
+/* 空中設置不可: スポーンから移動/回転(SRSキック)で到達し、下に動けない位置だけを返す (高速版) */
+const YHM = 48, WW = 14;
+const VIS = new Uint32Array(4 * WW * YHM * 3);
+let STAMP = 0;
+const STK = new Int32Array(4 * WW * YHM * 3);
+const FLAT = {}; // type -> [rot] -> Int8Array(8): x0,y0,x1,y1,...
+for (const t of TYPES) FLAT[t] = SHAPES[t].map(cs => { const a = new Int8Array(8); cs.forEach((c, i) => { a[2 * i] = c[0]; a[2 * i + 1] = c[1]; }); return a; });
+const KFLAT = { J: [], I: [] };
+for (const k of Object.keys(KJ)) { const [a, b] = k.split('>').map(Number); KFLAT.J[a * 4 + b] = KJ[k]; }
+for (const k of Object.keys(KI)) { const [a, b] = k.split('>').map(Number); KFLAT.I[a * 4 + b] = KI[k]; }
+let RW = null, RH = 0;
+function hitG(cells, px, py) {
+  for (let i = 0; i < 8; i += 2) {
+    const x = px + cells[i], y = py + cells[i + 1];
+    if (x < 0 || x > 9 || y < 0) return true;
+    if (y < RH && ((RW[y] >> x) & 1)) return true;
+  }
+  return false;
+}
+function placementsLite(type, rows) {
+  const H = rows.length, shp = FLAT[type];
+  if (H + 12 > YHM) throw new Error('盤面が高すぎます');
+  const YH = YHM;
+  if (++STAMP >= 0xfffffff0) { VIS.fill(0); STAMP = 1; }
+  const stamp = STAMP;
+  const px0 = type === 'O' ? 4 : 3, py0 = H + 1, ymaxLim = py0 + 3;
+  RW = rows; RH = H;
+  const hitF = hitG;
+  const out = new Map();
+  if (hitF(shp[0], px0, py0)) return [];
+  let sp = 0;
+  const enc = (r, x, y, f) => (((r * WW) + (x + 3)) * YH + (y + 3)) * 3 + f;
+  const push = (r, x, y, f) => {
+    if (x < -3 || x > 10 || y < -3 || y > ymaxLim) return;
+    const k = enc(r, x, y, f); if (VIS[k] === stamp) return; VIS[k] = stamp; STK[sp++] = k;
+  };
+  push(0, px0, py0, 0);
+  const kt = type === 'I' ? KFLAT.I : KFLAT.J;
+  const isT = type === 'T';
+  while (sp) {
+    let k = STK[--sp];
+    const f = k % 3; k = (k - f) / 3;
+    const yy = k % YH; k = (k - yy) / YH;
+    const xx = k % WW; const r = (k - xx) / WW;
+    const x = xx - 3, y = yy - 3, cells = shp[r];
+    if (hitF(cells, x, y - 1)) {
+      // 下に動けない = 設置可能
+      let c0 = (x + cells[0]) * 64 + (y + cells[1]) + 64, c1 = (x + cells[2]) * 64 + (y + cells[3]) + 64, c2 = (x + cells[4]) * 64 + (y + cells[5]) + 64, c3 = (x + cells[6]) * 64 + (y + cells[7]) + 64;
+      let t_;
+      if (c0 > c1) { t_ = c0; c0 = c1; c1 = t_; } if (c2 > c3) { t_ = c2; c2 = c3; c3 = t_; }
+      if (c0 > c2) { t_ = c0; c0 = c2; c2 = t_; } if (c1 > c3) { t_ = c1; c1 = c3; c3 = t_; }
+      if (c1 > c2) { t_ = c1; c1 = c2; c2 = t_; }
+      const nk = ((c0 * 1024 + c1) * 1024 + c2) * 1024 + c3;
+      let o = out.get(nk);
+      if (!o) {
+        const c8 = new Int8Array(8); for (let i = 0; i < 8; i++) c8[i] = cells[i] + ((i & 1) ? y : x);
+        let mi = 999; for (let i = 0; i < 8; i += 2) { const v = c8[i + 1] * 10 + c8[i]; if (v < mi) mi = v; }
+        const offs = []; for (let i = 0; i < 8; i += 2) { const v = c8[i + 1] * 10 + c8[i] - mi; if (v) offs.push(v); }
+        offs.sort((p, q) => p - q);
+        o = { c: c8, nk, tsFull: false, tsMini: false, id: String.fromCharCode(mi + 32, offs[0] + 32, offs[1] + 32, offs[2] + 32) };
+        out.set(nk, o);
+      }
+      if (isT && f > 0) {
+        const oc = (px, py) => (px < 0 || px > 9 || py < 0) ? true : (py < H && ((rows[py] >> px) & 1) === 1);
+        const cs = [oc(x, y), oc(x + 2, y), oc(x, y + 2), oc(x + 2, y + 2)];
+        if (cs[0] + cs[1] + cs[2] + cs[3] >= 3) {
+          const fr = [[[0, 1], [1, 1]], [[1, 1], [1, 0]], [[0, 0], [1, 0]], [[0, 1], [0, 0]]][r];
+          const im = { '0,0': 0, '1,0': 1, '0,1': 2, '1,1': 3 };
+          const fc = fr.filter(p => cs[im[p[0] + ',' + p[1]]]).length;
+          if (fc === 2 || f === 2) o.tsFull = true; else o.tsMini = true;
+        }
+      }
+    } else push(r, x, y - 1, 0);
+    if (!hitF(cells, x - 1, y)) push(r, x - 1, y, 0);
+    if (!hitF(cells, x + 1, y)) push(r, x + 1, y, 0);
+    if (type !== 'O') {
+      for (let d = 1; d < 4; d += 2) {
+        const nr = (r + d) & 3, ks = kt[r * 4 + nr], nc = shp[nr];
+        for (let i = 0; i < 5; i++) {
+          const nx = x + ks[i][0], ny = y + ks[i][1];
+          if (!hitF(nc, nx, ny)) { push(nr, nx, ny, i === 4 ? 2 : 1); break; }
+        }
+      }
+    }
+  }
+  return Array.from(out.values());
+}
+
+function placements(type, rows) {
+  const H = rows.length;
+  return placementsLite(type, rows).map(o => {
+    const abs = []; for (let i = 0; i < 8; i += 2) abs.push([o.c[i], o.c[i + 1]]);
+    const key = abs.map(c => c[0] * 100 + c[1]).sort((a, b) => a - b).join('.');
+    const hd = abs.every(c => { for (let r = c[1] + 1; r < H; r++) if ((rows[r] >> c[0]) & 1) return false; return true; });
+    return { t: type, key, cells: abs, tsFull: o.tsFull, tsMini: o.tsMini, hd };
+  });
+}
+
+function applyP(rows, cells) {
+  const nr = rows.slice();
+  for (let i = 0; i < 4; i++) {
+    const x = cells[i][0], y = cells[i][1];
+    while (nr.length <= y) nr.push(0);
+    nr[y] |= 1 << x;
+  }
+  const cleared = [], out = [];
+  for (let i = 0; i < nr.length; i++) { if (nr[i] === 1023) cleared.push(i); else out.push(nr[i]); }
+  while (out.length && out[out.length - 1] === 0) out.pop();
+  return { rows: out, cleared, pre: nr.length };
+}
+
+/* q: キュー文字列(先頭から), s: 設置順。ホールド1つで s の順に置けるか */
+function obtain(q, s, H) {
+  let i = 0, h = H || '';
+  const n = q.length;
+  for (let j = 0; j < s.length; j++) {
+    const w = s[j];
+    if (i < n && q[i] === w) { i++; continue; }
+    if (h === w) { if (i < n) { h = q[i]; i++; } else h = ''; continue; }
+    if (h === '' && i + 1 < n && q[i + 1] === w) { h = q[i]; i += 2; continue; }
+    return false;
+  }
+  return true;
+}
+
+/* R: ホールドに温存するミノ。到着した時点でホールドに入れ、以後ホールドは使えない */
+function obtainR(q, s, R, H) {
+  let i = 0, h = H || '', lock = !!H && H === R;
+  const n = q.length;
+  for (let j = 0; j < s.length; j++) {
+    const w = s[j];
+    for (;;) {
+      if (i >= n) { if (h === w && !lock) { h = ''; break; } return false; }
+      const c = q[i];
+      if (c === R) {
+        if (lock) return false;
+        if (h === '') { h = R; lock = true; i++; continue; }
+        if (h === w) { h = R; lock = true; i++; break; }
+        return false;
+      }
+      if (c === w) { i++; break; }
+      if (!lock && h === w) { h = c; i++; break; }
+      if (!lock && h === '' && i + 1 < n && q[i + 1] === w) { h = c; i += 2; break; }
+      return false;
+    }
+  }
+  return true;
+}
+
+function trimRows(rows) { const r = rows.slice(); while (r.length && r[r.length - 1] === 0) r.pop(); return r; }
+
+/* 各ミノの向き(重複除去)。基準セルは y最小→x最小 */
+const ORIENTS = {};
+for (const t of TYPES) {
+  const seen = new Set(); ORIENTS[t] = [];
+  for (const cells of SHAPES[t]) {
+    let minx = 9, miny = 9; for (const c of cells) { minx = Math.min(minx, c[0]); miny = Math.min(miny, c[1]); }
+    const norm = cells.map(c => [c[0] - minx, c[1] - miny]).sort((p, q) => p[1] - q[1] || p[0] - q[0]);
+    const key = norm.map(c => c.join(',')).join(';');
+    if (seen.has(key)) continue; seen.add(key);
+    ORIENTS[t].push({ cells: norm, fx: norm[0][0], fy: norm[0][1] });
+  }
+}
+
+/* 向きoの、行の間に消去済みの行(gap)を挟んだ形のバリエーション */
+const VCACHE = new Map();
+function variantsOf(t, oi, maxExtra) {
+  const key = t + oi + ':' + maxExtra;
+  let v = VCACHE.get(key); if (v) return v;
+  const o = ORIENTS[t][oi], h = o.cells[o.cells.length - 1][1] + 1;
+  v = [];
+  const rec = (j, gaps, used) => {
+    if (j === h - 1) {
+      const shift = [0]; for (let r = 1; r < h; r++) shift.push(shift[r - 1] + 1 + gaps[r - 1] - 1 + 0);
+      // shift[r] = r行目の実際のオフセット = r + (それ以前のgap合計)
+      const off = []; let acc = 0; off.push(0); for (let r = 1; r < h; r++) { acc += gaps[r - 1]; off.push(r + acc); }
+      v.push({ cells: o.cells.map(c => [c[0], off[c[1]]]), fx: o.fx, gap: used > 0 });
+      return;
+    }
+    for (let g = 0; g <= maxExtra - used; g++) { gaps.push(g); rec(j + 1, gaps, used + g); gaps.pop(); }
+  };
+  rec(0, [], 0);
+  VCACHE.set(key, v); return v;
+}
+
+function solvePC(input, progress) {
+  const t0 = Date.now();
+  const types = TYPES.split('').filter(t => input.types.includes(t));
+  const n = types.length;
+  const rows0 = trimRows(input.rows);
+  let F = 0;
+  for (const r of rows0) { if (r === 1023) return { error: '揃っている行があります。消した状態の地形を描いてください。' }; F += popcnt(r); }
+  const H = TYPES.includes(input.hold) ? input.hold : '';
+  const maxK = n + (H ? 1 : 0);
+  const avail = {}; for (const t of TYPES) avail[t] = (types.includes(t) ? 1 : 0) + (H === t ? 1 : 0);
+  const poolTypes = TYPES.split('').filter(t => avail[t] > 0);
+  const ks = []; for (let k = 1; k <= maxK; k++) if ((F + 4 * k) % 10 === 0) ks.push(k);
+  const info = { n, F, ks, height: rows0.length, hold: H };
+  if (!ks.length) return { error: `地形のブロック数が${F}個のため、ミノ(4マス)を足してもライン数が揃いません(1〜${maxK}ミノでは不可)。`, info };
+  const usable = ks.filter(k => k <= maxK && (F + 4 * k) / 10 >= rows0.length);
+  if (!usable.length) {
+    const tall = ks.filter(k => k <= maxK);
+    return { error: tall.length ? `地形が高すぎます。必要段数より地形の高さ(${rows0.length}段)が上回っています。` : `必要ミノ数は ${ks.join(' / ')} 個ですが、使えるミノは${maxK}個です。ミノを増やしてください。`, info };
+  }
+  const queues = perms(types), nq = queues.length, Wd = Math.ceil(nq / 32);
+  const cutOn = input.cut !== false;
+  const maxPatterns = input.maxPatterns || 40000, timeLimit = input.timeLimit || 120000;
+  let partial = false, tilingCount = 0;
+  const allPatterns = [];
+  const unions = { all: new Uint32Array(Wd), tsd: new Uint32Array(Wd), tss: new Uint32Array(Wd), quad: new Uint32Array(Wd) };
+  const orderBitsGlobal = new Map();
+  const bitsFor = (order) => {
+    let b = orderBitsGlobal.get(order);
+    if (!b) {
+      b = new Uint32Array(Wd);
+      for (let qi = 0; qi < nq; qi++) if (obtain(queues[qi], order, H)) b[qi >> 5] |= 1 << (qi & 31);
+      orderBitsGlobal.set(order, b);
+    }
+    return b;
+  };
+  const pcache = new Map();
+  const getPl = (t, rows) => { const key = t + '|' + rows.join(','); let v = pcache.get(key); if (!v) { v = new Map(); for (const p of placements(t, rows)) v.set(p.key, p); pcache.set(key, v); } return v; };
+  const cnt = (a) => { let s = 0; for (let w = 0; w < Wd; w++) s += popcnt(a[w]); return s; };
+
+  for (const k of usable) {
+    const L = (F + 4 * k) / 10;
+    if (progress) progress(`${k}ミノ(${L}段)の配置を列挙中…`);
+    const occ0 = []; for (let y = 0; y < L; y++) occ0.push(rows0[y] || 0);
+    const patterns = [];
+    const placed = [], uc = [0, 0, 0, 0, 0, 0, 0];
+    const emit = () => {
+      tilingCount++;
+      const m = placed.length, full = (1 << m) - 1;
+      const memo = new Map();
+      const pic = (S) => { const o = occ0.slice(); for (let i = 0; i < m; i++) if (S >> i & 1) for (const c of placed[i].cells) o[c[1]] |= 1 << c[0]; return o; };
+      const ord = (S) => {
+        if (S === full) return new Map([['', 0]]);
+        const mm = memo.get(S); if (mm !== undefined) return mm;
+        const o = pic(S);
+        const clearedBelow = []; let acc = 0;
+        for (let y = 0; y < L; y++) { clearedBelow.push(acc); if (o[y] === 1023) acc++; }
+        const rows = trimRows(o.filter(r => r !== 1023));
+        const res = new Map();
+        for (let i = 0; i < m; i++) {
+          if (S >> i & 1) continue;
+          const pc = placed[i];
+          const cur = pc.cells.map(c => [c[0], c[1] - clearedBelow[c[1]]]);
+          const key = cur.map(c => c[0] * 100 + c[1]).sort((a, b) => a - b).join('.');
+          const pl = getPl(pc.t, rows).get(key);
+          if (!pl) continue;
+          let cl = 0; for (let y = 0; y < L; y++) if (o[y] !== 1023) { let r = o[y]; for (const c of pc.cells) if (c[1] === y) r |= 1 << c[0]; if (r === 1023) cl++; }
+          let tg = 0;
+          if (pc.t === 'T' && cl === 2 && (pl.tsFull || pl.tsMini)) tg |= 1;
+          if (pc.t === 'T' && cl === 1 && pl.tsFull) tg |= 2;
+          if (pc.t === 'I' && cl === 4) tg |= 4;
+          const sub = ord(S | 1 << i);
+          if (!sub) continue;
+          for (const [suf, st] of sub) res.set(pc.t + suf, st | tg);
+        }
+        const out = res.size ? res : null; memo.set(S, out); return out;
+      };
+      const orders = ord(0);
+      if (!orders) return;
+      const grid = []; for (let y = 0; y < L; y++) { const r = Array(10).fill('.'); for (let x = 0; x < 10; x++) if ((occ0[y] >> x) & 1) r[x] = 'G'; grid.push(r); }
+      for (const p of placed) for (const c of p.cells) grid[c[1]][c[0]] = p.t;
+      patterns.push({ grid: grid.map(r => r.join('')), orders, cut: placed.some(p => p.gap) });
+    };
+    const tile = (occ, used) => {
+      if (partial) return;
+      let cx = -1, cy = -1;
+      outer: for (let y = 0; y < L; y++) { if (occ[y] === 1023) continue; for (let x = 0; x < 10; x++) if (!((occ[y] >> x) & 1)) { cx = x; cy = y; break outer; } }
+      if (cx < 0) { if (placed.length === k) emit(); return; }
+      if (placed.length >= k) return;
+      if ((tilingCount & 255) === 0 && Date.now() - t0 > timeLimit) { partial = true; return; }
+      for (const t of poolTypes) {
+        const ti = TYPES.indexOf(t); if (uc[ti] >= avail[t]) continue;
+        for (let oi = 0; oi < ORIENTS[t].length; oi++) {
+          const ob = ORIENTS[t][oi], h = ob.cells[ob.cells.length - 1][1] + 1;
+          const vs = variantsOf(t, oi, cutOn ? Math.max(0, L - h) : 0);
+          for (const o of vs) {
+            const cells = []; let ok = true;
+            for (const c of o.cells) {
+              const x = cx + c[0] - o.fx, y = cy + c[1];
+              if (x < 0 || x > 9 || y < 0 || y >= L || ((occ[y] >> x) & 1)) { ok = false; break; }
+              cells.push([x, y]);
+            }
+            if (!ok) continue;
+            const no = occ.slice(); for (const c of cells) no[c[1]] |= 1 << c[0];
+            placed.push({ t, cells, gap: o.gap });
+            uc[ti]++; tile(no, 0); uc[ti]--;
+            placed.pop();
+            if (partial) return;
+          }
+        }
+      }
+    };
+    tile(occ0, 0);
+    if (progress) progress(`${k}ミノ: ${patterns.length}パターン、被覆計算中…`);
+    for (const pat of patterns) {
+      if (allPatterns.length >= maxPatterns) { partial = true; break; }
+      const all = new Uint32Array(Wd), tsd = new Uint32Array(Wd), tss = new Uint32Array(Wd), qd = new Uint32Array(Wd);
+      let tagAny = 0;
+      for (const [order, tg] of pat.orders) {
+        const b = bitsFor(order); tagAny |= tg;
+        for (let w = 0; w < Wd; w++) {
+          all[w] |= b[w];
+          if (tg & 1) tsd[w] |= b[w];
+          if (tg & 2) tss[w] |= b[w];
+          if (tg & 4) qd[w] |= b[w];
+        }
+      }
+      for (let w = 0; w < Wd; w++) { unions.all[w] |= all[w]; unions.tsd[w] |= tsd[w]; unions.tss[w] |= tss[w]; unions.quad[w] |= qd[w]; }
+      const exq = (a) => { const r = []; for (let qi = 0; qi < nq && r.length < 5; qi++) if ((a[qi >> 5] >>> (qi & 31)) & 1) r.push(queues[qi]); return r; };
+      const exoOf = (bit) => { const r = []; for (const [o, tg] of pat.orders) { if (!bit || (tg & bit)) { r.push(o); if (r.length >= 3) break; } } return r; };
+      allPatterns.push({
+        grid: pat.grid, cut: pat.cut, k, L, nOrders: pat.orders.size, cov: cnt(all), covT: cnt(tsd), covS: cnt(tss), covQ: cnt(qd), tags: tagAny,
+        ex: { all: exq(all), tsd: exq(tsd), tss: exq(tss), quad: exq(qd) }, exo: { all: exoOf(0), tsd: exoOf(1), tss: exoOf(2), quad: exoOf(4) }, bits: all,
+      });
+    }
+  }
+  allPatterns.sort((a, b) => b.cov - a.cov || (a.grid.join('') < b.grid.join('') ? -1 : 1));
+  const covered = cnt(unions.all);
+  if (progress) progress('最少パターンを探索中…');
+  const min = minCover(allPatterns.map(p => p.bits), unions.all, nq, Wd, 2500);
+  const counts = { all: allPatterns.length, tsd: 0, tss: 0, quad: 0 };
+  for (const p of allPatterns) { if (p.covT) counts.tsd++; if (p.covS) counts.tss++; if (p.covQ) counts.quad++; }
+  const patterns = allPatterns.map(p => { const q = Object.assign({}, p); delete q.bits; return q; });
+  return {
+    ok: true, hold: H, info, usable, nq, covered, pct: covered / nq * 100, patterns, counts,
+    cover: { all: covered, tsd: cnt(unions.tsd), tss: cnt(unions.tss), quad: cnt(unions.quad) },
+    min, partial, tilingCount, ms: Date.now() - t0,
+  };
+}
+
+/* 最少集合被覆: 貪欲 + 分枝限定(打ち切りあり) */
+function minCover(sets, target, nq, Wd, limitMs) {
+  const P = sets.length, t0 = Date.now();
+  const cnt = (a) => { let s = 0; for (let w = 0; w < Wd; w++) s += popcnt(a[w]); return s; };
+  const total = cnt(target);
+  if (!P || !total) return { idx: [], exact: true, gains: [] };
+  const covered = new Uint32Array(Wd), pick = [], gains = [];
+  const gainOf = (s, cov) => { let g = 0; for (let w = 0; w < Wd; w++) g += popcnt(s[w] & ~cov[w] & target[w]); return g; };
+  let rem = total;
+  while (rem > 0) {
+    let bi = -1, bg = 0;
+    for (let i = 0; i < P; i++) { const g = gainOf(sets[i], covered); if (g > bg) { bg = g; bi = i; } }
+    if (bi < 0) break;
+    pick.push(bi); gains.push(bg); rem -= bg;
+    for (let w = 0; w < Wd; w++) covered[w] |= sets[bi][w];
+  }
+  // 冗長除去
+  for (let j = pick.length - 1; j >= 0; j--) {
+    const c = new Uint32Array(Wd);
+    pick.forEach((p, i) => { if (i !== j) for (let w = 0; w < Wd; w++) c[w] |= sets[p][w]; });
+    let ok = true; for (let w = 0; w < Wd; w++) if ((target[w] & ~c[w]) !== 0) { ok = false; break; }
+    if (ok) pick.splice(j, 1);
+  }
+  let best = pick.slice(), exact = false;
+  if (P <= 30000 && best.length > 1) {
+    const lists = new Map();
+    for (let qi = 0; qi < nq; qi++) if ((target[qi >> 5] >>> (qi & 31)) & 1) lists.set(qi, []);
+    for (let i = 0; i < P; i++) { const s = sets[i]; for (let w = 0; w < Wd; w++) { let v = s[w] & target[w]; while (v) { const b = v & -v; const qi = (w << 5) + (31 - Math.clz32(b)); lists.get(qi).push(i); v ^= b; } } }
+    let maxCov = 0; for (let i = 0; i < P; i++) maxCov = Math.max(maxCov, cnt(sets[i]));
+    let nodes = 0, aborted = false;
+    const rec = (cov, chosen, remaining) => {
+      if (aborted) return;
+      if (remaining === 0) { if (chosen.length < best.length) best = chosen.slice(); return; }
+      if (++nodes % 256 === 0 && Date.now() - t0 > limitMs) { aborted = true; return; }
+      if (chosen.length + Math.ceil(remaining / maxCov) >= best.length) return;
+      let e = -1, el = 1e9;
+      for (const [qi, l] of lists) { if (((cov[qi >> 5] >>> (qi & 31)) & 1) === 0 && l.length < el) { el = l.length; e = qi; } }
+      const cands = lists.get(e).map(i => [i, gainOf(sets[i], cov)]).sort((a, b) => b[1] - a[1]);
+      for (const [i, g] of cands) {
+        const nc = new Uint32Array(cov); for (let w = 0; w < Wd; w++) nc[w] |= sets[i][w];
+        chosen.push(i); rec(nc, chosen, remaining - g); chosen.pop();
+        if (aborted) return;
+      }
+    };
+    rec(new Uint32Array(Wd), [], total);
+    exact = !aborted;
+  } else if (best.length <= 1) exact = true;
+  // 貢献度順に並べる
+  const cov2 = new Uint32Array(Wd), ordered = [], g2 = [];
+  const left = best.slice();
+  while (left.length) {
+    let bi = 0, bg = -1;
+    left.forEach((p, i) => { const g = gainOf(sets[p], cov2); if (g > bg) { bg = g; bi = i; } });
+    const p = left.splice(bi, 1)[0]; ordered.push(p); g2.push(bg);
+    for (let w = 0; w < Wd; w++) cov2[w] |= sets[p][w];
+  }
+  return { idx: ordered, exact, gains: g2 };
+}
+
+/* セットアップ率 (ライン消去・初期ホールド・ハードドロップ判定つき) */
+function solveSetup(input) {
+  const t0 = Date.now();
+  const lenient = input.lenient !== false;
+  const reserve = input.reserve || '';
+  const H0 = TYPES.includes(input.hold) ? input.hold : '';
+  const g = input.grid.slice(); // 下から上へ、10文字の文字列
+  while (g.length && /^\.*$/.test(g[g.length - 1])) g.pop();
+  const baseRows = [], cellsOf = {};
+  for (let y = 0; y < g.length; y++) {
+    let m = 0, allG = true;
+    for (let x = 0; x < 10; x++) {
+      const ch = g[y][x];
+      if (ch !== 'G') allG = false;
+      if (ch === '.') continue;
+      if (ch === 'G') m |= 1 << x;
+      else (cellsOf[ch] = cellsOf[ch] || []).push([x, y]);
+    }
+    if (allG) return { error: '灰色だけで揃っている行があります。最初から揃っている行は置けません。' };
+    baseRows.push(m);
+  }
+  const targets = TYPES.split('').filter(t => cellsOf[t]);
+  if (!targets.length) return { error: '色付きのミノがありません。組み立てたいミノを色付きで描いてください(灰色は最初からある地形です)。' };
+  for (const t of targets) {
+    const n4 = cellsOf[t].length;
+    if (n4 % 4 !== 0 || n4 > 8) return { error: `${t}ミノは${n4}マスです。1つにつき4マスで描いてください(同じミノを2つ使うときは8マス)。` };
+    const c = n4 / 4, avail = 1 + (H0 === t ? 1 : 0);
+    if (c > avail) return { error: `${t}ミノを${c}つ分(${n4}マス)描いていますが、1巡で来る${t}は1つだけです。初期ホールドに${t}を指定すると、${t}を2つ使えます。` };
+  }
+  if (reserve && targets.includes(reserve)) return { error: `ホールドに残す${reserve}ミノは、組み立てるミノと同じ色です。別のミノを選ぶか、設定を「なし」にしてください。` };
+  const pcache = new Map();
+  const getPl = (t, rows) => { const key = t + '|' + rows.join(','); let v = pcache.get(key); if (!v) { v = new Map(); for (const p of placements(t, rows)) v.set(p.key, p); pcache.set(key, v); } return v; };
+  const L = baseRows.length;
+  // 同じ色を2つ使う場合の、8マスの分け方(各グループ4マス)
+  const spanOk = (t, cells) => { let lo = 9, hi = 0; for (const c of cells) { lo = Math.min(lo, c[0]); hi = Math.max(hi, c[0]); } return hi - lo + 1 <= (t === 'I' ? 4 : t === 'O' ? 2 : 3); };
+  const splits = (cells) => {
+    const res = [], rest = cells.slice(1);
+    for (let a = 0; a < 7; a++) for (let b = a + 1; b < 7; b++) for (let c = b + 1; c < 7; c++) {
+      res.push([[cells[0], rest[a], rest[b], rest[c]], rest.filter((_, i) => i !== a && i !== b && i !== c)]);
+    }
+    return res;
+  };
+  const opts = targets.map(t => {
+    const cells = cellsOf[t];
+    if (cells.length === 4) return spanOk(t, cells) ? [[cells]] : [];
+    return splits(cells).filter(sp => sp.every(g => spanOk(t, g)));
+  });
+  if (opts.some(o => !o.length)) return { error: 'ミノの形になっていない色があります。' };
+  let combos = 1; for (const o of opts) combos *= o.length;
+  if (combos > 4000) return { error: '同じミノを2つ使う色が多すぎて、分け方の候補が膨らみます。2つ使う色を減らしてください。' };
+  const orderMap = new Map(); // 設置順 -> ハードドロップのみで可能か
+  const diagMap = {}; targets.forEach(t => { diagMap[t] = { t, alone: false, last: false }; });
+  const analyze = (inst) => {
+    const m = inst.length, full = (1 << m) - 1;
+    const can = [];
+    for (let mask = 0; mask < (1 << m); mask++) {
+      const o = baseRows.slice();
+      inst.forEach((p, i) => { if (mask >> i & 1) for (const c of p.cells) o[c[1]] |= 1 << c[0]; });
+      const below = []; let acc = 0;
+      for (let y = 0; y < L; y++) { below.push(acc); if (o[y] === 1023) acc++; }
+      const rows = trimRows(o.filter(r => r !== 1023));
+      can[mask] = [];
+      for (let i = 0; i < m; i++) {
+        if (mask >> i & 1) { can[mask][i] = null; continue; }
+        const cur = inst[i].cells.map(c => [c[0], c[1] - below[c[1]]]);
+        const key = cur.map(c => c[0] * 100 + c[1]).sort((p, q) => p - q).join('.');
+        const p = getPl(inst[i].t, rows).get(key);
+        can[mask][i] = p ? { hd: p.hd } : null;
+      }
+    }
+    inst.forEach((p, i) => { if (can[0][i]) diagMap[p.t].alone = true; if (can[full & ~(1 << i)][i]) diagMap[p.t].last = true; });
+    (function rec(mask, s, hdAll) {
+      if (mask === full) { orderMap.set(s, (orderMap.get(s) || false) || hdAll); return; }
+      for (let i = 0; i < m; i++) { const c = can[mask][i]; if (c) rec(mask | 1 << i, s + inst[i].t, hdAll && c.hd); }
+    })(0, '', true);
+  };
+  const idx = opts.map(() => 0);
+  for (;;) {
+    const inst = [];
+    targets.forEach((t, k) => { for (const g of opts[k][idx[k]]) inst.push({ t, cells: g }); });
+    analyze(inst);
+    let k = 0; while (k < idx.length && ++idx[k] >= opts[k].length) { idx[k] = 0; k++; }
+    if (k === idx.length) break;
+  }
+  const orders = Array.from(orderMap.keys()), ordersHd = orders.filter(o => orderMap.get(o));
+  const diag = targets.map(t => diagMap[t]);
+  // 初期ホールド: 使わないミノは(寛容モードでは)捨てられるので、空と同じ扱い
+  const H = (lenient && H0 && !targets.includes(H0) && H0 !== reserve) ? '' : H0;
+  const queues = perms(TYPES.split('')), nq = queues.length;
+  const qf = lenient ? queues.map(q => q.split('').filter(c => targets.includes(c) || c === reserve).join('')) : queues;
+  const ob = reserve ? (q, o) => obtainR(q, o, reserve, H) : (q, o) => obtain(q, o, H);
+  const okQ = new Uint8Array(nq), okQhd = new Uint8Array(nq);
+  const cover = (list, arr) => { for (const o of list) for (let qi = 0; qi < nq; qi++) if (!arr[qi] && ob(qf[qi], o)) arr[qi] = 1; };
+  cover(orders, okQ); cover(ordersHd, okQhd);
+  let ok = 0, okHd = 0; for (let i = 0; i < nq; i++) { ok += okQ[i]; okHd += okQhd[i]; }
+  const okEx = [], ngEx = [];
+  for (let i = 0; i < nq; i++) { if (okQ[i]) { if (okEx.length < 6) okEx.push(queues[i]); } else if (ngEx.length < 6) ngEx.push(queues[i]); }
+  // 組み立て順の例: 最も多くの並びで使える順
+  let bestOrder = orders[0] || null;
+  if (orders.length > 1) { let bc = -1; for (const o of orders) { let c = 0; for (let qi = 0; qi < nq; qi++) if (ob(qf[qi], o)) c++; if (c > bc) { bc = c; bestOrder = o; } } }
+  return {
+    ok: true, nq, count: ok, pct: ok / nq * 100, countHd: okHd, pctHd: okHd / nq * 100, targets,
+    nOrders: orders.length, nOrdersHd: ordersHd.length, bestOrder, diag, okEx, ngEx,
+    lenient, reserve, hold: H0, grid: g, okQ, okQhd, ms: Date.now() - t0,
+  };
+}
+
+/* 複数地形: どれか1つ以上組める確率 */
+function solveSetupMulti(input) {
+  const t0 = Date.now();
+  const items = input.items.map(it => ({ name: it.name, reserve: it.reserve || '', res: solveSetup({ grid: it.grid, lenient: input.lenient, reserve: it.reserve, hold: input.hold }) }));
+  const good = items.filter(it => it.res.ok);
+  if (!good.length) return { ok: true, items, nq: 5040, none: true, ms: Date.now() - t0 };
+  const queues = perms(TYPES.split('')), nq = queues.length;
+  let uni = 0, uniHd = 0, multi = 0; const okEx = [], ngEx = [];
+  for (let i = 0; i < nq; i++) {
+    let c = 0, ch = 0; for (const it of good) { c += it.res.okQ[i]; ch += it.res.okQhd[i]; }
+    if (c > 0) { uni++; if (okEx.length < 6) okEx.push(queues[i]); } else if (ngEx.length < 6) ngEx.push(queues[i]);
+    if (ch > 0) uniHd++;
+    if (c > 1) multi++;
+  }
+  for (const it of good) {
+    let drop = 0, dropHd = 0;
+    for (let i = 0; i < nq; i++) {
+      let other = 0, otherHd = 0; for (const o of good) if (o !== it) { other += o.res.okQ[i]; otherHd += o.res.okQhd[i]; }
+      if (it.res.okQ[i] && !other) drop++;
+      if (it.res.okQhd[i] && !otherHd) dropHd++;
+    }
+    it.drop = drop; it.dropHd = dropHd;
+  }
+  return { ok: true, items, nq, count: uni, pct: uni / nq * 100, countHd: uniHd, pctHd: uniHd / nq * 100, multi, okEx, ngEx, hold: input.hold || '', ms: Date.now() - t0 };
+}
+
+/* ---------- TSD補完 ---------- */
+/* Tをホールドに温存したまま、I J L O S Z を置いて組める順(プレイ順)を全列挙 */
+function genOrders(q, tset, N) {
+  tset = tset || 'IJLOSZ'; N = N || 6;
+  const res = new Set(), n = q.length;
+  const rec = (i, h, lock, placed) => {
+    if (placed.length === N) { res.add(placed.join('')); return; }
+    if (i >= n) { if (h && h !== 'T' && !lock) rec(i, '', false, placed.concat(h)); return; }
+    const c = q[i];
+    if (c === 'T') {
+      if (lock) return;
+      if (h === '') rec(i + 1, 'T', true, placed); else rec(i + 1, 'T', true, placed.concat(h));
+      return;
+    }
+    if (tset.indexOf(c) < 0) { rec(i + 1, h, lock, placed); return; } // 使わないミノは地形の外で処理
+    rec(i + 1, h, lock, placed.concat(c));
+    if (!lock) { if (h === '') rec(i + 1, c, false, placed); else rec(i + 1, c, false, placed.concat(h)); }
+  };
+  rec(0, '', false, []);
+  return res;
+}
+
+/* ---------- TSD補完 ----------
+   「消す2ライン(r, r+1)」と「Tの最終位置」を先に決め、その2ラインの空きマスを6ミノで埋める(厳密被覆)形で
+   最終地形を列挙する。残りのミノは空きマスを埋めない位置に自由配置。各地形は後から全分割を数えて確率を厳密に求める。 */
+const GEOM = new Map();
+function geomOf(t, maxH) {
+  const key = t + maxH; let g = GEOM.get(key); if (g) return g;
+  const list = [], byCell = new Map();
+  for (const o of ORIENTS[t]) {
+    let w = 0, h = 0; for (const c of o.cells) { w = Math.max(w, c[0] + 1); h = Math.max(h, c[1] + 1); }
+    for (let oy = 0; oy + h <= maxH; oy++) for (let ox = 0; ox + w <= 10; ox++) {
+      const cells = o.cells.map(c => [c[0] + ox, c[1] + oy]);
+      const c8 = new Int8Array(8); cells.forEach((c, i) => { c8[2 * i] = c[0]; c8[2 * i + 1] = c[1]; });
+      const codes = cells.map(c => c[0] * 64 + c[1] + 64).sort((a, b) => a - b);
+      const nk = ((codes[0] * 1024 + codes[1]) * 1024 + codes[2]) * 1024 + codes[3];
+      const key2 = cells.map(c => c[0] + ',' + c[1]).sort().join(';');
+      const p = { t, cells, c: c8, nk, key: key2, idx: list.length };
+      list.push(p);
+      for (const c of cells) { const k = c[1] * 10 + c[0]; let l = byCell.get(k); if (!l) { l = []; byCell.set(k, l); } l.push(p); }
+    }
+  }
+  g = { list, byCell }; GEOM.set(key, g); return g;
+}
+
+let TSD_QCACHE = null;
+function tsdQueues(tset, N) {
+  const ck = tset + N; if (TSD_QCACHE && TSD_QCACHE.key === ck) return TSD_QCACHE;
+  const queues = perms(TYPES.split('')), nq = queues.length, Wd = Math.ceil(nq / 32);
+  const orderQ = new Map();
+  queues.forEach((q, qi) => { for (const o of genOrders(q, tset, N)) { let l = orderQ.get(o); if (!l) { l = []; orderQ.set(o, l); } l.push(qi); } });
+  TSD_QCACHE = { key: ck, nq, Wd, orderQ, orderBits: new Map() };
+  return TSD_QCACHE;
+}
+
+function tsdSession(input) {
+  const maxH = Math.max(3, Math.min(8, input.maxH || 4));
+  const base = trimRows(input.rows);
+  if (base.some(r => r === 1023)) return { error: '揃っている行があります。消した状態の地形を描いてください。' };
+  if (base.length > maxH) return { error: `地形の高さ(${base.length}段)が高さ上限(${maxH}段)を超えています。` };
+  const P = (input.pieces && input.pieces.length ? 'IJLOSZ'.split('').filter(t => input.pieces.indexOf(t) >= 0) : ['I', 'J', 'L', 'O', 'S', 'Z']);
+  const N = P.length, FULL = (1 << N) - 1, tset = P.join('');
+  const fixedBy = {};
+  for (const f of (input.fixed || [])) fixedBy[f.t] = f.cells.map(c => c[0] + ',' + c[1]).sort().join(';');
+  const forbid = []; for (let y = 0; y < maxH; y++) forbid.push(((input.forbid || [])[y] || 0) & 1023);
+  const hitsF = (p) => { for (const c of p.cells) if ((forbid[c[1]] >> c[0]) & 1) return true; return false; };
+  const anyForbid = forbid.some(m => m);
+  const geomL = (t) => { const g = geomOf(t, maxH); return anyForbid ? g.list.filter(p => !hitsF(p)) : g.list; };
+  const allowed = P.map(t => { const l = geomL(t); return fixedBy[t] === undefined ? l : l.filter(p => p.key === fixedBy[t]); });
+  const baseR = []; for (let y = 0; y < maxH; y++) baseR.push(base[y] || 0);
+  const tList = geomL('T');
+  const clearRows = []; if (input.clearRow >= 0 && input.clearRow <= maxH - 2) clearRows.push(input.clearRow | 0); else for (let r = 0; r + 1 < maxH; r++) clearRows.push(r);
+  for (let i = clearRows.length - 1; i >= 0; i--) if (forbid[clearRows[i]] || forbid[clearRows[i] + 1]) clearRows.splice(i, 1); // ✕のある行は揃えられない
+
+  let pcache = new Map();
+  const getPl = (t, rows) => { const key = t + '|' + rows.join(','); let v = pcache.get(key); if (!v) { if (pcache.size > 12000) pcache = new Map(); v = placementsLite(t, rows); pcache.set(key, v); } return v; };
+  const tsdCache = new Map();
+  const hasTsd = (rows) => {
+    const key = rows.join(','); let v = tsdCache.get(key);
+    if (v === undefined) {
+      v = false;
+      for (const p of placementsLite('T', rows)) {
+        if (!(p.tsFull || p.tsMini)) continue;
+        if (anyForbid) { let hf = false; for (let i = 0; i < 8; i += 2) if (p.c[i + 1] < maxH && ((forbid[p.c[i + 1]] >> p.c[i]) & 1)) hf = true; if (hf) continue; }
+        const nr = rows.slice(); for (let i = 0; i < 8; i += 2) { while (nr.length <= p.c[i + 1]) nr.push(0); nr[p.c[i + 1]] |= 1 << p.c[i]; }
+        if (nr.filter(r => r === 1023).length === 2) { v = true; break; }
+      }
+      if (tsdCache.size > 100000) tsdCache.clear();
+      tsdCache.set(key, v);
+    }
+    return v;
+  };
+  const Q = tsdQueues(tset, N); const nq = Q.nq, Wd = Q.Wd;
+  const bitsOf = (o) => { let b = Q.orderBits.get(o); if (!b) { b = new Uint32Array(Wd); for (const qi of Q.orderQ.get(o) || []) b[qi >> 5] |= 1 << (qi & 31); Q.orderBits.set(o, b); } return b; };
+  const cnt = (a) => { let s = 0; for (let w = 0; w < Wd; w++) s += popcnt(a[w]); return s; };
+
+  /* 最終地形Fの、6ミノへの全分割から確率(ミノ順の集合)を求める */
+  function evalTerrain(Fr) {
+    const rem = []; for (let y = 0; y < maxH; y++) rem.push((Fr[y] || 0) & ~baseR[y]);
+    const tilings = [], cur = new Array(N).fill(null);
+    const rec = (mask) => {
+      let y = 0, x = -1;
+      for (; y < maxH; y++) { if (rem[y]) { x = 31 - Math.clz32(rem[y] & -rem[y]); break; } }
+      if (x < 0) { if (mask === FULL) tilings.push(cur.map(p => p)); return; }
+      for (let ti = 0; ti < N; ti++) {
+        if (mask >> ti & 1) continue;
+        const l = geomOf(P[ti], maxH).byCell.get(y * 10 + x); if (!l) continue;
+        for (const p of l) {
+          if (fixedBy[P[ti]] !== undefined && p.key !== fixedBy[P[ti]]) continue;
+          let ok = true; for (const c of p.cells) if (!((rem[c[1]] >> c[0]) & 1)) { ok = false; break; }
+          if (!ok) continue;
+          for (const c of p.cells) rem[c[1]] ^= 1 << c[0];
+          cur[ti] = p; rec(mask | 1 << ti);
+          for (const c of p.cells) rem[c[1]] ^= 1 << c[0];
+          cur[ti] = null;
+        }
+      }
+    };
+    rec(0);
+    const bits = new Uint32Array(Wd); let bestD = null, bestC = -1; const altL = [];
+    let H = trimRows(Fr).length; for (let y = 0; y < maxH; y++) if (forbid[y] && y < H) { /* ✕は表示範囲内のみ */ }
+    const gridOf = (d) => { const grid = []; for (let y = 0; y < H; y++) { const r = Array(10).fill('.'); for (let x = 0; x < 10; x++) { if ((forbid[y] >> x) & 1) r[x] = 'X'; if ((baseR[y] >> x) & 1) r[x] = 'G'; } grid.push(r); } d.forEach((p, i) => { for (const cc of p.cells) grid[cc[1]][cc[0]] = P[i]; }); return grid.map(r => r.join('')); };
+    for (const d of tilings) {
+      const can = [];
+      for (let mask = 0; mask <= FULL; mask++) {
+        const rows = base.slice();
+        for (let i = 0; i < N; i++) if (mask >> i & 1) for (let j = 0; j < 8; j += 2) { while (rows.length <= d[i].c[j + 1]) rows.push(0); rows[d[i].c[j + 1]] |= 1 << d[i].c[j]; }
+        can[mask] = [];
+        for (let i = 0; i < N; i++) can[mask][i] = !(mask >> i & 1) && getPl(P[i], rows).some(p => p.nk === d[i].nk);
+      }
+      const tb = new Uint32Array(Wd);
+      (function r2(mask, s) {
+        if (mask === FULL) { const b = bitsOf(s); for (let w = 0; w < Wd; w++) tb[w] |= b[w]; return; }
+        for (let i = 0; i < N; i++) if (can[mask][i]) r2(mask | 1 << i, s + P[i]);
+      })(0, '');
+      for (let w = 0; w < Wd; w++) bits[w] |= tb[w];
+      const c1 = cnt(tb);
+      if (c1 > 0) altL.push({ c1, d });
+      if (c1 > bestC) { bestC = c1; bestD = d; }
+    }
+    const c = cnt(bits); if (!c) return null;
+    altL.sort((x, y) => y.c1 - x.c1);
+    const alts = altL.slice(0, 12).map(x => ({ grid: gridOf(x.d), own: x.c1 }));
+    return { grid: gridOf(bestD), cov: c, bits, own: bestC, nt: altL.length, alts };
+  }
+
+  const seenF = new Set();
+  let steps = 0, tried = 0;
+  function* gen() {
+    for (const r of clearRows) {
+      for (const tp of tList) {
+        let inRows = 0, okT = true;
+        for (const c of tp.cells) {
+          if (c[1] < r - 1 || c[1] > r + 2 || ((baseR[c[1]] >> c[0]) & 1)) { okT = false; break; }
+          if (c[1] === r || c[1] === r + 1) inRows++;
+        }
+        if (!okT || inRows < 3) continue;
+        const occ = baseR.slice(); for (const c of tp.cells) occ[c[1]] |= 1 << c[0];
+        const chosen = new Array(N).fill(null);
+        const cover = function* (mask) {
+          if ((++steps & 4095) === 0) yield null;
+          if (occ[r] === 1023 && occ[r + 1] === 1023) { yield* free(mask, 0); return; }
+          let x = 0, y = r; while (((occ[y] >> x) & 1)) { x++; if (x > 9) { x = 0; y++; } }
+          const k = y * 10 + x;
+          for (let ti = 0; ti < N; ti++) {
+            if (mask >> ti & 1) continue;
+            const l = geomOf(P[ti], maxH).byCell.get(k); if (!l) continue;
+            for (const p of l) {
+              if (fixedBy[P[ti]] !== undefined && p.key !== fixedBy[P[ti]]) continue;
+              if (anyForbid && hitsF(p)) continue;
+              let ok = true; for (const c of p.cells) if ((occ[c[1]] >> c[0]) & 1) { ok = false; break; }
+              if (!ok) continue;
+              for (const c of p.cells) occ[c[1]] |= 1 << c[0];
+              chosen[ti] = p;
+              yield* cover(mask | 1 << ti);
+              chosen[ti] = null;
+              for (const c of p.cells) occ[c[1]] ^= 1 << c[0];
+            }
+          }
+        };
+        const free = function* (mask, ti) {
+          while (ti < N && (mask >> ti & 1)) ti++;
+          if (ti >= N) { const t = finalize(chosen); if (t) yield t; return; }
+          if ((++steps & 4095) === 0) yield null;
+          for (const p of allowed[ti]) {
+            let ok = true; for (const c of p.cells) if ((occ[c[1]] >> c[0]) & 1) { ok = false; break; }
+            if (!ok) continue;
+            for (const c of p.cells) occ[c[1]] |= 1 << c[0];
+            chosen[ti] = p;
+            yield* free(mask | 1 << ti, ti + 1);
+            chosen[ti] = null;
+            for (const c of p.cells) occ[c[1]] ^= 1 << c[0];
+          }
+        };
+        const finalize = (ch) => {
+          const Fr = baseR.slice(); for (const p of ch) for (const c of p.cells) Fr[c[1]] |= 1 << c[0];
+          for (let y = 0; y < maxH; y++) if (Fr[y] === 1023) return null;
+          for (const p of ch) { // 支え(床・地形・他のミノ)が無いミノは置けない
+            let sup = false;
+            for (const c of p.cells) {
+              if (c[1] === 0) { sup = true; break; }
+              if (((Fr[c[1] - 1] >> c[0]) & 1) && !p.cells.some(q => q[0] === c[0] && q[1] === c[1] - 1)) { sup = true; break; }
+            }
+            if (!sup) return null;
+          }
+          const key = Fr.join(','); if (seenF.has(key)) return null; seenF.add(key);
+          tried++;
+          if (!hasTsd(trimRows(Fr))) return null;
+          return evalTerrain(Fr);
+        };
+        yield* cover(0);
+      }
+    }
+  }
+  const it = gen();
+  const found = []; let exhausted = false;
+  const sess = {
+    nq, found,
+    minExcluding(ids) {
+      const ex = new Set(ids), list = found.filter(t => !ex.has(t.id));
+      if (!list.length) return { ids: [], covered: 0, nq, excluded: ex.size, empty: true, exact: true };
+      const union = new Uint32Array(Wd); for (const t of list) for (let w = 0; w < Wd; w++) union[w] |= t.bits[w];
+      const min = minCover(list.map(t => t.bits), union, nq, Wd, 2500);
+      return { ids: min.idx.map(i => list[i].id), covered: cnt(union), nq, excluded: ex.size, empty: false, exact: min.exact };
+    },
+    run(progress, o) {
+      o = o || {}; const t0 = Date.now(), batch = o.batch || 100, timeLimit = o.timeLimit || 90000;
+      let added = 0, status = 'done', lastP = t0;
+      if (!exhausted) {
+        for (;;) {
+          const r = it.next();
+          if (r.done) { exhausted = true; status = 'done'; break; }
+          if (r.value) { r.value.id = found.length; found.push(r.value); added++; if (added >= batch) { status = 'cap'; break; } }
+          const now = Date.now();
+          if (now - t0 > timeLimit) { status = 'time'; break; }
+          if (progress && now - lastP > 700) { lastP = now; progress(`探索中… ${found.length}通り見つかりました`); }
+        }
+      }
+      const terrains = found.slice().sort((a, b) => b.cov - a.cov || (a.grid.join('/') < b.grid.join('/') ? -1 : 1));
+      const union = new Uint32Array(Wd); for (const t of terrains) for (let w = 0; w < Wd; w++) union[w] |= t.bits[w];
+      const min = terrains.length ? minCover(terrains.map(t => t.bits), union, nq, Wd, 2500) : { idx: [], exact: true };
+      return {
+        ok: true, nq, total: terrains.length, covered: cnt(union), min: { idx: min.idx, exact: min.exact },
+        terrains: terrains.map(t => ({ grid: t.grid, cov: t.cov, id: t.id, own: t.own, nt: t.nt, alts: t.alts })), states: tried, ms: Date.now() - t0,
+        status, partial: status === 'done' ? null : { why: status === 'cap' ? `TSD地形が${batch}個見つかった時点で探索を打ち切った` : '探索時間の上限に達した', lim: '' },
+      };
+    },
+  };
+  return sess;
+}
+
+function solveTsd(input, progress) {
+  const s = tsdSession(input); if (s.error) return s;
+  return s.run(progress, { batch: input.maxTerrains || 500, timeLimit: input.timeLimit || 90000 });
+}
+
+let TSD_SESSION = null;
+
+if (typeof self !== 'undefined' && typeof importScripts === 'function') {
+  self.onmessage = (e) => {
+    const d = e.data;
+    try {
+      const prog = (msg) => self.postMessage({ type: 'progress', msg });
+      let res;
+      if (d.kind === 'tsd') { TSD_SESSION = tsdSession(d); res = TSD_SESSION.error ? TSD_SESSION : TSD_SESSION.run(prog, { batch: 500, timeLimit: 90000 }); }
+      else if (d.kind === 'tsd-min') { res = TSD_SESSION ? TSD_SESSION.minExcluding(d.exclude || []) : { error: '先に探索を開始してください。' }; }
+      else if (d.kind === 'tsd-more') { res = TSD_SESSION ? TSD_SESSION.run(prog, { batch: 500, timeLimit: 90000 }) : { error: '先に探索を開始してください。' }; }
+      else res = d.kind === 'pc' ? solvePC(d, prog) : solveSetupMulti(d);
+      self.postMessage({ type: 'done', kind: d.kind === 'tsd-more' ? 'tsd' : d.kind, res });
+    } catch (err) { self.postMessage({ type: 'error', msg: String(err && err.stack || err) }); }
+  };
+}
+if (typeof module !== 'undefined') module.exports = { solveTsd, genOrders, solvePC, solveSetup, solveSetupMulti, obtainR, placements, obtain, applyP, perms, SHAPES };
+
+</script>
+<script>
+(function () {
+  'use strict';
+  var COLORS = { I: '#31c7ef', J: '#4b6fd6', L: '#ef8a2a', O: '#f3d21a', S: '#47b947', T: '#b05ac0', Z: '#ee3a3a', G: '#7b8794', X: '#26313b' };
+  var TYPES = 'IJLOSTZ', ROWS = 12, COLS = 10;
+  var $ = function (id) { return document.getElementById(id); };
+  var dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+
+  /* ---------- 状態 ---------- */
+  function emptyGrid() { var g = []; for (var y = 0; y < ROWS; y++) g.push(new Array(COLS).fill('.')); return g; }
+  var SAMPLE = ['OO....TLLL', 'OO....TT.L', '......T...'];
+  function sampleGrid() { var g = emptyGrid(); SAMPLE.forEach(function (r, y) { for (var x = 0; x < COLS; x++) g[y][x] = r[x]; }); return g; }
+  var terrains = [{ name: 'A', grid: sampleGrid(), reserve: '', include: true }], active = 0, tool = 'G', selected = new Set(TYPES.split('')), grid, hold = '';
+  function validGrid(g) { return Array.isArray(g) && g.length === ROWS && g.every(function (r) { return typeof r === 'string' && r.length === COLS; }); }
+  try {
+    var saved = JSON.parse(localStorage.getItem('pc-tool-v2') || 'null');
+    if (saved && saved.terrains && saved.terrains.length && saved.terrains.every(function (x) { return validGrid(x.grid); })) {
+      terrains = saved.terrains.map(function (x) { return { name: x.name, grid: x.grid.map(function (r) { return r.split(''); }), reserve: x.reserve || '', include: x.include !== false }; });
+      active = Math.max(0, Math.min(saved.active | 0, terrains.length - 1));
+    } else {
+      var old = JSON.parse(localStorage.getItem('pc-tool-v1') || 'null');
+      if (old && validGrid(old.grid)) terrains[0].grid = old.grid.map(function (r) { return r.split(''); });
+    }
+    if (saved && saved.sel && saved.sel.length) selected = new Set(saved.sel);
+    if (saved && typeof saved.hold === 'string' && (saved.hold === '' || TYPES.indexOf(saved.hold) >= 0)) hold = saved.hold;
+  } catch (e) {}
+  grid = terrains[active].grid;
+  /* パフェ率とセットアップ率は別々のテト譜・設定を持つ(ページ切替で入れ替える) */
+  var ctx = { setup: { terrains: terrains, active: active, hold: hold, selected: new Set(TYPES.split('')) }, pc: null }, curCtx = 'setup';
+  (function () {
+    var pg = { name: 'A', grid: terrains[active].grid.map(function (r) { return r.slice(); }), reserve: '', include: true }, psel = new Set(selected), phold = hold;
+    try {
+      var sv = JSON.parse(localStorage.getItem('pc-tool-pcv1') || 'null');
+      if (sv && validGrid(sv.grid)) {
+        pg.grid = sv.grid.map(function (r) { return r.split(''); });
+        if (sv.sel && sv.sel.length) psel = new Set(sv.sel);
+        phold = (sv.hold === '' || TYPES.indexOf(sv.hold) >= 0) ? sv.hold : '';
+      }
+    } catch (e) {}
+    ctx.pc = { terrains: [pg], active: 0, hold: phold, selected: psel };
+    ctx.setup.hold = hold;
+  })();
+  function persist() {
+    ctx[curCtx] = { terrains: terrains, active: active, hold: hold, selected: selected };
+    try {
+      var s = ctx.setup, p = ctx.pc;
+      localStorage.setItem('pc-tool-v2', JSON.stringify({
+        terrains: s.terrains.map(function (x) { return { name: x.name, grid: x.grid.map(function (r) { return r.join(''); }), reserve: x.reserve, include: x.include }; }),
+        active: s.active, sel: Array.from(s.selected), hold: s.hold
+      }));
+      localStorage.setItem('pc-tool-pcv1', JSON.stringify({ grid: p.terrains[0].grid.map(function (r) { return r.join(''); }), sel: Array.from(p.selected), hold: p.hold }));
+    } catch (e) {}
+  }
+  function swapCtx(name) {
+    if (name === curCtx) return;
+    ctx[curCtx] = { terrains: terrains, active: active, hold: hold, selected: selected };
+    var n = ctx[name]; terrains = n.terrains; active = n.active; hold = n.hold; selected = n.selected; grid = terrains[active].grid; curCtx = name;
+    TYPES.split('').forEach(function (t) { var c = $('mino-' + t); if (c) c.checked = selected.has(t); });
+    renderTabs(); renderHolds();
+  }
+  function setGrid(g) { grid = g; terrains[active].grid = g; }
+
+  /* ---------- 描画 ---------- */
+  function drawGrid(cv, rowsArr, o) {
+    var cs = o.cs, R = o.rows || rowsArr.length, w = COLS * cs, h = R * cs;
+    cv.width = w * dpr; cv.height = h * dpr; cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    var c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var cs0 = getComputedStyle(document.documentElement);
+    c.fillStyle = o.bg || '#0d1319'; c.fillRect(0, 0, w, h);
+    c.strokeStyle = o.line || '#1d2a35'; c.lineWidth = 1; c.beginPath();
+    for (var i = 0; i <= COLS; i++) { c.moveTo(i * cs + .5, 0); c.lineTo(i * cs + .5, h); }
+    for (var j = 0; j <= R; j++) { c.moveTo(0, j * cs + .5); c.lineTo(w, j * cs + .5); }
+    c.stroke();
+    for (var y = 0; y < rowsArr.length && y < R; y++) {
+      var row = rowsArr[y];
+      for (var x = 0; x < COLS; x++) {
+        var ch = row[x]; if (!ch || ch === '.') continue;
+        var px = x * cs, py = (R - 1 - y) * cs;
+        if (ch === 'X') {
+          c.fillStyle = COLORS.X; c.fillRect(px + 1, py + 1, cs - 1, cs - 1);
+          c.strokeStyle = '#8c98a4'; c.lineWidth = Math.max(1.5, cs * .1); c.beginPath(); var m = cs * .25;
+          c.moveTo(px + m, py + m); c.lineTo(px + cs - m, py + cs - m); c.moveTo(px + cs - m, py + m); c.lineTo(px + m, py + cs - m); c.stroke();
+          c.strokeStyle = o.line || '#1d2a35'; c.lineWidth = 1;
+          continue;
+        }
+        c.fillStyle = COLORS[ch]; c.fillRect(px + 1, py + 1, cs - 1, cs - 1);
+        c.fillStyle = 'rgba(255,255,255,.22)'; c.fillRect(px + 1, py + 1, cs - 1, Math.max(2, cs * .14));
+        c.fillStyle = 'rgba(0,0,0,.18)'; c.fillRect(px + 1, py + cs - Math.max(2, cs * .14), cs - 1, Math.max(2, cs * .14) - 0);
+      }
+    }
+    if (o.labels) {
+      c.font = '700 ' + Math.floor(cs * .6) + 'px "JetBrains Mono", monospace'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      Object.keys(o.labels).forEach(function (t) {
+        var sx = 0, sy = 0, n = 0;
+        for (var y = 0; y < rowsArr.length; y++) for (var x = 0; x < COLS; x++) if (rowsArr[y][x] === t) { sx += x + .5; sy += y + .5; n++; }
+        if (!n) return;
+        var tx = sx / n * cs, ty = (R - sy / n) * cs;
+        c.lineWidth = 3; c.strokeStyle = 'rgba(0,0,0,.65)'; c.strokeText(o.labels[t], tx, ty);
+        c.fillStyle = '#fff'; c.fillText(o.labels[t], tx, ty);
+      });
+    }
+  }
+  function editorRows() { return grid.map(function (r) { return r.join(''); }); }
+  function redrawEditor() {
+    drawGrid($('editor'), editorRows(), { cs: 28, rows: ROWS });
+    var g = 0, col = 0;
+    grid.forEach(function (r) { r.forEach(function (v) { if (v === 'G') g++; else if (v !== '.') col++; }); });
+    $('edcount').textContent = 'ブロック ' + (g + col) + '(灰 ' + g + ' / 色付き ' + col + ')';
+    persist();
+  }
+
+  /* ---------- パレット ---------- */
+  var palEl = $('palette');
+  var palDefs = [['.', '消しゴム'], ['G', '地形'], ['I'], ['L'], ['O'], ['Z'], ['T'], ['J'], ['S']];
+  palDefs.forEach(function (d) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'pal' + (d[0] === '.' ? ' erase' : '');
+    b.dataset.v = d[0]; b.setAttribute('aria-pressed', d[0] === tool ? 'true' : 'false');
+    var sw = document.createElement('i'); if (d[0] !== '.') sw.style.background = COLORS[d[0]];
+    b.appendChild(sw); b.appendChild(document.createTextNode(d[1] || d[0]));
+    b.addEventListener('click', function () { tool = d[0]; palEl.querySelectorAll('.pal').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.v === tool ? 'true' : 'false'); }); });
+    palEl.appendChild(b);
+  });
+
+  /* ---------- エディタ操作 ---------- */
+  var painting = false, paintVal = '.';
+  function cellAt(e) {
+    var r = $('editor').getBoundingClientRect();
+    var x = Math.floor((e.clientX - r.left) / r.width * COLS), t = Math.floor((e.clientY - r.top) / r.height * ROWS);
+    if (x < 0 || x >= COLS || t < 0 || t >= ROWS) return null;
+    return [x, ROWS - 1 - t];
+  }
+  $('editor').addEventListener('pointerdown', function (e) {
+    var c = cellAt(e); if (!c) return;
+    e.preventDefault(); $('editor').setPointerCapture(e.pointerId);
+    paintVal = (grid[c[1]][c[0]] === tool) ? '.' : tool; painting = true;
+    grid[c[1]][c[0]] = paintVal; redrawEditor();
+  });
+  $('editor').addEventListener('pointermove', function (e) {
+    if (!painting) return; var c = cellAt(e); if (!c) return;
+    if (grid[c[1]][c[0]] !== paintVal) { grid[c[1]][c[0]] = paintVal; redrawEditor(); }
+  });
+  ['pointerup', 'pointercancel'].forEach(function (n) { $('editor').addEventListener(n, function () { painting = false; }); });
+  $('btn-clear').addEventListener('click', function () { setGrid(emptyGrid()); redrawEditor(); });
+  $('btn-sample').addEventListener('click', function () { setGrid(sampleGrid()); redrawEditor(); });
+
+  /* ---------- 地形タブとセットアップ設定 ---------- */
+  var NAMES = 'ABCDEF';
+  function renderTabs() {
+    var tabs = $('tabs'); tabs.innerHTML = '';
+    terrains.forEach(function (x, i) {
+      var b = h('button', 'tab', x.name); b.type = 'button'; b.setAttribute('aria-pressed', i === active ? 'true' : 'false');
+      b.setAttribute('aria-label', '地形' + x.name);
+      b.addEventListener('click', function () { active = i; grid = terrains[i].grid; renderTabs(); redrawEditor(); });
+      tabs.appendChild(b);
+    });
+    if (terrains.length < NAMES.length) {
+      var add = h('button', 'btn', '+ 地形を追加'); add.type = 'button';
+      add.addEventListener('click', function () {
+        var used = terrains.map(function (x) { return x.name; }), nm = NAMES.split('').filter(function (c) { return used.indexOf(c) < 0; })[0];
+        terrains.push({ name: nm, grid: emptyGrid(), reserve: '', include: true }); active = terrains.length - 1; grid = terrains[active].grid;
+        renderTabs(); redrawEditor();
+      });
+      tabs.appendChild(add);
+    }
+    var ts = $('tset'); ts.innerHTML = '';
+    var cur = terrains[active];
+    var w1 = h('div'); w1.appendChild(h('div', 'label', '地形' + cur.name + ': ホールドに残すミノ'));
+    var ch = h('div', 'chips'); ch.style.marginTop = '6px';
+    [''].concat(TYPES.split('')).forEach(function (v) {
+      var b = h('button', null, v || 'なし'); b.type = 'button'; b.setAttribute('aria-pressed', cur.reserve === v ? 'true' : 'false');
+      b.addEventListener('click', function () { cur.reserve = v; persist(); renderTabs(); });
+      ch.appendChild(b);
+    });
+    w1.appendChild(ch); ts.appendChild(w1);
+    var lb = h('label', 'check'); var cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'inc'; cb.checked = cur.include;
+    cb.addEventListener('change', function () { cur.include = cb.checked; persist(); });
+    lb.appendChild(cb); lb.appendChild(h('span', null, 'セットアップ率の計算に含める(複数チェックで「どれか1つ以上」の合算率)'));
+    ts.appendChild(lb);
+    if (terrains.length > 1) {
+      var del = h('button', 'btn', '地形' + cur.name + 'を削除'); del.type = 'button'; del.style.justifySelf = 'start';
+      del.addEventListener('click', function () { terrains.splice(active, 1); active = Math.max(0, active - 1); grid = terrains[active].grid; renderTabs(); redrawEditor(); });
+      ts.appendChild(del);
+    }
+    persist();
+  }
+
+  /* ---------- 使用ミノ ---------- */
+  var minosEl = $('minos');
+  TYPES.split('').forEach(function (t) {
+    var l = document.createElement('label'); l.className = 'mino';
+    var inp = document.createElement('input'); inp.type = 'checkbox'; inp.id = 'mino-' + t; inp.checked = selected.has(t);
+    var sp = document.createElement('span'); var sw = document.createElement('i'); sw.style.background = COLORS[t];
+    sp.appendChild(sw); sp.appendChild(document.createTextNode(t)); l.appendChild(inp); l.appendChild(sp);
+    inp.addEventListener('change', function () {
+      if (inp.checked) selected.add(t); else { if (selected.size <= 1) { inp.checked = true; return; } selected.delete(t); }
+      persist();
+    });
+    minosEl.appendChild(l);
+  });
+  $('m-all').addEventListener('click', function () { TYPES.split('').forEach(function (t) { selected.add(t); $('mino-' + t).checked = true; }); persist(); });
+
+  function renderHolds() {
+    ['holds', 'holds-s'].forEach(function (id) {
+      var el = $(id); el.innerHTML = '';
+      [''].concat(TYPES.split('')).forEach(function (v) {
+        var b = h('button', null, v || 'なし'); b.type = 'button'; b.setAttribute('aria-pressed', hold === v ? 'true' : 'false');
+        b.addEventListener('click', function () { hold = v; persist(); renderHolds(); });
+        el.appendChild(b);
+      });
+    });
+  }
+
+  /* ---------- ページ切替 ---------- */
+  function showPage(name) {
+    ['pc', 'setup', 'tsd'].forEach(function (n) {
+      $('page-' + n).hidden = name !== n;
+      $('nav-' + n).setAttribute('aria-selected', name === n ? 'true' : 'false');
+    });
+    if (name === 'pc' || name === 'setup') { swapCtx(name); $('slot-' + name).appendChild($('edcard')); $('edcard').classList.toggle('pc-mode', name === 'pc'); }
+    try { localStorage.setItem('pc-tool-page', name); } catch (e) {}
+    if (name === 'tsd') redrawT(); else redrawEditor();
+  }
+  $('nav-pc').addEventListener('click', function () { showPage('pc'); });
+  $('nav-setup').addEventListener('click', function () { showPage('setup'); });
+  $('nav-tsd').addEventListener('click', function () { showPage('tsd'); });
+
+  /* ---------- TSD補完: 地形エディタ ---------- */
+  var TSD_SAMPLE = [];
+  var tgrid = emptyGrid(), ttool = 'G', tmaxH = 4;
+  function tsdSampleGrid() { var g = emptyGrid(); TSD_SAMPLE.forEach(function (m, y) { for (var x = 0; x < COLS; x++) if ((m >> x) & 1) g[y][x] = 'G'; }); return g; }
+  tgrid = tsdSampleGrid();
+  try {
+    var ts = JSON.parse(localStorage.getItem('pc-tool-tsd-v1') || 'null');
+    if (ts && validGrid(ts.grid)) tgrid = ts.grid.map(function (r) { return r.split(''); });
+    if (ts && ts.maxH >= 3 && ts.maxH <= 8) tmaxH = ts.maxH | 0;
+  } catch (e) {}
+  function tPersist() { try { localStorage.setItem('pc-tool-tsd-v1', JSON.stringify({ grid: tgrid.map(function (r) { return r.join(''); }), maxH: tmaxH })); } catch (e) {} }
+  function redrawT() {
+    drawGrid($('ted'), tgrid.map(function (r) { return r.join(''); }), { cs: 28, rows: ROWS });
+    var n = 0; tgrid.forEach(function (r) { r.forEach(function (v) { if (v !== '.') n++; }); });
+    $('tedcount').textContent = 'ブロック ' + n; tPersist();
+  }
+  var tPal = $('tpalette');
+  [['.', '消しゴム'], ['G', '地形'], ['X', '✕ 埋めない'], ['I'], ['L'], ['O'], ['Z'], ['J'], ['S']].forEach(function (d) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'pal' + (d[0] === '.' ? ' erase' : ''); b.dataset.v = d[0];
+    b.setAttribute('aria-pressed', d[0] === ttool ? 'true' : 'false');
+    var sw = document.createElement('i'); if (d[0] !== '.') sw.style.background = COLORS[d[0]];
+    b.appendChild(sw); b.appendChild(document.createTextNode(d[1] || d[0]));
+    b.addEventListener('click', function () { ttool = d[0]; tPal.querySelectorAll('.pal').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.v === ttool ? 'true' : 'false'); }); });
+    tPal.appendChild(b);
+  });
+  var tPainting = false, tVal = '.';
+  function tCell(e) {
+    var r = $('ted').getBoundingClientRect();
+    var x = Math.floor((e.clientX - r.left) / r.width * COLS), y = ROWS - 1 - Math.floor((e.clientY - r.top) / r.height * ROWS);
+    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return null; return [x, y];
+  }
+  $('ted').addEventListener('pointerdown', function (e) {
+    var c = tCell(e); if (!c) return; e.preventDefault(); $('ted').setPointerCapture(e.pointerId);
+    tVal = (tgrid[c[1]][c[0]] === ttool) ? '.' : ttool; tPainting = true; tgrid[c[1]][c[0]] = tVal; redrawT();
+  });
+  $('ted').addEventListener('pointermove', function (e) {
+    if (!tPainting) return; var c = tCell(e); if (!c) return;
+    if (tgrid[c[1]][c[0]] !== tVal) { tgrid[c[1]][c[0]] = tVal; redrawT(); }
+  });
+  ['pointerup', 'pointercancel'].forEach(function (n) { $('ted').addEventListener(n, function () { tPainting = false; }); });
+  $('tsd-clear').addEventListener('click', function () { tgrid = emptyGrid(); redrawT(); });
+  $('tsd-sample').addEventListener('click', function () { tgrid = tsdSampleGrid(); redrawT(); });
+  var selH = $('tsd-h');
+  for (var hh = 3; hh <= 8; hh++) { var op = document.createElement('option'); op.value = String(hh); op.textContent = hh + '段'; if (hh === tmaxH) op.selected = true; selH.appendChild(op); }
+  var selR = $('tsd-row');
+  function fillRows() {
+    var cur = selR.value || '-1'; selR.innerHTML = '';
+    var o = document.createElement('option'); o.value = '-1'; o.textContent = '指定しない(自動)'; selR.appendChild(o);
+    for (var r = 0; r + 1 < tmaxH; r++) { var op2 = document.createElement('option'); op2.value = String(r); op2.textContent = (r + 1) + '・' + (r + 2) + '段目'; selR.appendChild(op2); }
+    selR.value = (parseInt(cur, 10) < tmaxH - 1) ? cur : '-1';
+  }
+  fillRows();
+  selH.addEventListener('change', function () { tmaxH = parseInt(selH.value, 10); tPersist(); fillRows(); });
+
+  /* ---------- ワーカー ---------- */
+  var blobUrl = URL.createObjectURL(new Blob([$('engine').textContent], { type: 'text/javascript' }));
+  var worker = null, timer = null, t0 = 0, runningKind = null;
+  function setMsg(m) { document.querySelectorAll('.smsg').forEach(function (s) { s.textContent = m; }); }
+  function setBusy(kind, msg) {
+    $('btn-pc').disabled = !!kind; $('btn-setup').disabled = !!kind; $('btn-tsd').disabled = !!kind;
+    $('btn-tsd-more').disabled = !!kind || !tsdMoreOK; $('btn-tsd-auto').disabled = !!kind || !tsdMoreOK; $('btn-auto-off').hidden = !(kind === 'tsd' && autoMore);
+    document.querySelectorAll('.status').forEach(function (s) { s.classList.toggle('on', !!kind); });
+    if (msg) setMsg(msg);
+  }
+  var tsdMoreOK = false, autoMore = false, autoN = 0;
+  function stop() { autoMore = false; if (worker) { worker.terminate(); worker = null; } clearInterval(timer); runningKind = null; tsdMoreOK = false; setBusy(null); }
+  document.querySelectorAll('.cancel').forEach(function (b) { b.addEventListener('click', stop); });
+  function launch(payload) {
+    stop(); runningKind = payload.kind; t0 = Date.now(); var base = '計算中…';
+    setBusy(payload.kind, base);
+    timer = setInterval(function () { var m = base + ' ' + ((Date.now() - t0) / 1000).toFixed(0) + '秒'; setMsg(m); }, 500);
+    worker = new Worker(blobUrl);
+    worker.onmessage = function (e) {
+      var d = e.data;
+      if (d.type === 'progress') { base = d.msg; return; }
+      if (d.kind === 'tsd-min') { if (d.res && !d.res.error) renderMinResult(d.res); return; }
+      var kind = runningKind;
+      if (kind === 'tsd' && d.res && !d.res.error && d.res.status) { clearInterval(timer); runningKind = null; tsdMoreOK = d.res.status !== 'done'; if (!tsdMoreOK) autoMore = false; setBusy(null); } else stop();
+      if (d.type === 'error') { showError(kind, d.msg); return; }
+      if (kind === 'pc') renderPC(d.res); else if (kind === 'tsd') renderTsd(d.res); else renderSetup(d.res);
+      if (kind === 'tsd' && autoMore && tsdMoreOK && worker) { autoN++; moreTsd(); }
+    };
+    worker.onerror = function (e) { var k = runningKind; stop(); showError(k, e.message || 'エラーが発生しました'); };
+    worker.postMessage(payload);
+  }
+  $('btn-tsd-more').addEventListener('click', function () { moreTsd(); });
+  $('btn-tsd-auto').addEventListener('click', function () { if (!worker) return; autoMore = true; autoN = 1; moreTsd(); });
+  $('btn-auto-off').addEventListener('click', function () { autoMore = false; $('btn-auto-off').hidden = true; setMsg('現在の探索が終わり次第、自動追加を止めます…'); });
+  function moreTsd() {
+    if (!worker) { $('btn-tsd').click(); return; }
+    runningKind = 'tsd'; t0 = Date.now(); var base = autoMore ? '自動で最後まで探索中(' + autoN + '回目)…' : '続きを探索中…';
+    setBusy('tsd', base);
+    timer = setInterval(function () { var m = base + ' ' + ((Date.now() - t0) / 1000).toFixed(0) + '秒'; setMsg(m); }, 500);
+    worker.postMessage({ kind: 'tsd-more' });
+  }
+  function showError(kind, msg) {
+    var el = kind === 'pc' ? $('res-pc') : kind === 'tsd' ? $('res-tsd') : $('res-setup');
+    el.className = 'card res on'; el.innerHTML = '';
+    var p = document.createElement('p'); p.className = 'errmsg'; p.textContent = '計算できませんでした。' + String(msg).split('\n')[0]; el.appendChild(p);
+  }
+  $('btn-pc').addEventListener('click', function () {
+    var rows = grid.map(function (r) { var m = 0; r.forEach(function (v, x) { if (v !== '.') m |= 1 << x; }); return m; });
+    pcName = terrains[active].name;
+    launch({ kind: 'pc', rows: rows, types: Array.from(selected), cut: true, hold: hold });
+  });
+  $('btn-tsd').addEventListener('click', function () {
+    var rows = tgrid.map(function (r) { var m = 0; r.forEach(function (v, x) { if (v === 'G') m |= 1 << x; }); return m; });
+    var forbid = tgrid.map(function (r) { var m = 0; r.forEach(function (v, x) { if (v === 'X') m |= 1 << x; }); return m; });
+    var fx = {}; tgrid.forEach(function (r, y) { r.forEach(function (v, x) { if (v !== '.' && v !== 'G' && v !== 'X') (fx[v] = fx[v] || []).push([x, y]); }); });
+    var fixed = [], bad = '';
+    Object.keys(fx).forEach(function (k) { if (fx[k].length !== 4) bad = k + 'ミノは' + fx[k].length + 'マスです。固定ミノは1つにつき4マスで描いてください。'; else fixed.push({ t: k, cells: fx[k] }); });
+    if (bad) { var el = $('res-tsd'); el.className = 'card res on'; el.innerHTML = ''; el.appendChild(h('p', 'errmsg', bad)); return; }
+    tsdExcluded = new Set();
+    launch({ kind: 'tsd', rows: rows, forbid: forbid, fixed: fixed, maxH: tmaxH, clearRow: parseInt(selR.value, 10) });
+  });
+  $('btn-setup').addEventListener('click', function () {
+    var items = terrains.filter(function (x) { return x.include; }).map(function (x) { return { name: x.name, grid: x.grid.map(function (r) { return r.join(''); }), reserve: x.reserve }; });
+    if (!items.length) { var el = $('res-setup'); el.className = 'card res on'; el.innerHTML = ''; el.appendChild(h('h2', null, 'セットアップ率')); el.appendChild(h('p', 'errmsg', '計算に含める地形がありません。地形の「セットアップ率の計算に含める」にチェックを入れてください。')); return; }
+    launch({ kind: 'setup', items: items, lenient: $('lenient').checked, hold: hold });
+  });
+
+  /* ---------- 結果表示 ---------- */
+  function h(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function pctStr(n, d) { return (n / d * 100).toFixed(2); }
+  function bigPct(el, pct) {
+    var b = h('div', 'big'); b.appendChild(document.createTextNode(pct.toFixed(2))); b.appendChild(h('small', null, '%')); el.appendChild(b);
+  }
+  function meter(el, pct) { var m = h('div', 'meter'); var i = h('div'); i.style.width = Math.min(100, pct) + '%'; m.appendChild(i); el.appendChild(m); }
+  function kpi(el, items) {
+    var k = h('div', 'kpis');
+    items.forEach(function (it) { var s = h('span', null, it[0] + ' '); s.appendChild(h('b', null, it[1])); k.appendChild(s); });
+    el.appendChild(k);
+  }
+  function chips(arr) { var c = h('div', 'chips'); arr.forEach(function (q) { c.appendChild(h('span', 'chip', q)); }); return c; }
+  function arrow(o) { return o.split('').join(' → '); }
+  function copyText(txt, btn) {
+    var done = function (ok) { var o = btn.textContent; btn.textContent = ok ? 'コピーしました' : 'コピーできません'; setTimeout(function () { btn.textContent = o; }, 1400); };
+    try { navigator.clipboard.writeText(txt).then(function () { done(true); }, function () { done(false); }); } catch (e) { done(false); }
+  }
+
+  var pcState = null, pcName = 'A';
+  var compactView = false;
+  function scaleCanvases() {
+    document.querySelectorAll('#res-pc canvas, #res-tsd canvas').forEach(function (cv) {
+      if (!cv.dataset.ow) { cv.dataset.ow = parseFloat(cv.style.width); cv.dataset.oh = parseFloat(cv.style.height); }
+      var k = cv.closest('.compact-on') ? 0.5 : 1;
+      cv.style.width = (cv.dataset.ow * k) + 'px'; cv.style.height = (cv.dataset.oh * k) + 'px';
+    });
+  }
+  function applyCompact() { ['res-pc', 'res-tsd'].forEach(function (id) { $(id).classList.toggle('compact-on', compactView); }); document.querySelectorAll('.viewtoggle').forEach(function (b) { b.setAttribute('aria-pressed', compactView ? 'true' : 'false'); b.textContent = compactView ? '詳細表示にする' : '地形のみ横並びで表示'; }); scaleCanvases(); }
+  function viewToggle() {
+    var b = h('button', 'btn viewtoggle'); b.type = 'button';
+    b.addEventListener('click', function () { compactView = !compactView; applyCompact(); });
+    return b;
+  }
+  function renderPC(res) {
+    var el = $('res-pc'); el.className = 'card res on'; el.innerHTML = '';
+    el.appendChild(h('h2', null, 'パフェ率(地形' + pcName + ')'));
+    if (res.error) { el.appendChild(h('p', 'errmsg', res.error)); return; }
+    bigPct(el, res.pct);
+    kpi(el, [['並び', res.nq + '通り中 ' + res.covered + '通り'], ['必要ミノ数', res.usable.join('/') + '個']].concat(res.hold ? [['初期ホールド', res.hold]] : []).concat([ ['計算', (res.ms / 1000).toFixed(2) + '秒']]));
+    meter(el, res.pct);
+    if (res.partial) el.appendChild(h('p', 'warn', '探索の上限に達したため、結果は一部のみです。'));
+    if (!res.patterns.length) { el.appendChild(h('p', 'empty', 'この地形・この使用ミノではパフェを取れる形が見つかりませんでした。ミノを増やすか、地形を変えてみてください。')); return; }
+    pcState = { res: res, mode: 'min', shown: 0 };
+    var modes = [['min', '最少PC', res.min.idx.length], ['all', '全PC', res.counts.all], ['tsd', 'TSDPC', res.counts.tsd], ['tss', 'TSSPC', res.counts.tss], ['quad', 'QPC', res.counts.quad]];
+    var box = h('div', 'modes'); box.setAttribute('role', 'group'); box.setAttribute('aria-label', '表示するパフェパターン');
+    modes.forEach(function (m) {
+      var b = h('button', 'mode'); b.type = 'button'; b.dataset.m = m[0]; b.setAttribute('aria-pressed', m[0] === 'min' ? 'true' : 'false');
+      b.appendChild(h('b', null, m[1])); b.appendChild(h('span', null, m[2] + '通り'));
+      if (!m[2]) b.disabled = true;
+      b.addEventListener('click', function () {
+        pcState.mode = m[0]; pcState.shown = 0;
+        box.querySelectorAll('.mode').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.m === m[0] ? 'true' : 'false'); });
+        renderList();
+      });
+      box.appendChild(b);
+    });
+    el.appendChild(box);
+    el.appendChild(viewToggle()); applyCompact();
+    var info = h('p', 'modeinfo'); info.id = 'modeinfo'; el.appendChild(info);
+    var list = h('div', 'plist'); list.id = 'plist'; el.appendChild(list);
+    var more = h('button', 'btn more', ''); more.id = 'more'; more.type = 'button'; more.addEventListener('click', function () { appendCards(); }); el.appendChild(more);
+    renderList();
+  }
+  var PAGE = 24;
+  function modeItems() {
+    var r = pcState.res, m = pcState.mode, P = r.patterns, items = [];
+    if (m === 'min') r.min.idx.forEach(function (i, n) { items.push({ p: P[i], cov: P[i].cov, gain: r.min.gains[n], key: 'all' }); });
+    else if (m === 'all') P.forEach(function (p) { items.push({ p: p, cov: p.cov, key: 'all' }); });
+    else {
+      var f = { tsd: 'covT', tss: 'covS', quad: 'covQ' }[m];
+      P.filter(function (p) { return p[f] > 0; }).sort(function (a, b) { return b[f] - a[f]; }).forEach(function (p) { items.push({ p: p, cov: p[f], key: m }); });
+    }
+    return items;
+  }
+  function renderList() {
+    var r = pcState.res, m = pcState.mode, nq = r.nq;
+    var items = pcState.items = modeItems();
+    var info = $('modeinfo'); info.innerHTML = '';
+    var strong = function (t) { return h('b', null, t); };
+    var add = function () { for (var i = 0; i < arguments.length; i++) info.appendChild(typeof arguments[i] === 'string' ? document.createTextNode(arguments[i]) : arguments[i]); };
+    if (m === 'min') add('この', strong(items.length + '枚'), 'で全体の', strong(pctStr(r.covered, nq) + '%'), 'をカバーします。' + (r.min.exact ? '(最小であることを確認済み)' : '(探索を打ち切ったため、最小でない可能性があります)'));
+    else if (m === 'all') add('パフェを取れる形は', strong(items.length + '通り'), '。合計で', strong(pctStr(r.covered, nq) + '%'), 'の並びをカバーします。');
+    else { var lab = { tsd: 'TSDを含むパフェ', tss: 'TSSを含むパフェ', quad: 'TETRISを含むパフェ' }[m]; add(lab + 'は', strong(items.length + '通り'), '。合計で', strong(pctStr(r.cover[m], nq) + '%'), 'の並びで取れます。'); }
+    $('plist').innerHTML = '';
+    pcState.shown = 0; appendCards();
+  }
+  function appendCards() {
+    var items = pcState.items, nq = pcState.res.nq, list = $('plist');
+    var end = Math.min(items.length, pcState.shown + PAGE);
+    for (var i = pcState.shown; i < end; i++) list.appendChild(card(items[i], i, nq));
+    pcState.shown = end; scaleCanvases();
+    var more = $('more'); more.style.display = end < items.length ? '' : 'none';
+    more.textContent = 'さらに表示(残り ' + (items.length - end) + '件)';
+  }
+  function card(it, idx, nq) {
+    var p = it.p, c = h('div', 'pcard');
+    var top = h('div', 'top');
+    top.appendChild(h('span', 'sub', '#' + (idx + 1) + ' ・ ' + p.k + 'ミノ ' + p.L + '段' + (p.cut ? ' ・ 分断あり' : '')));
+    top.appendChild(h('span', 'pct', pctStr(it.cov, nq) + '%'));
+    c.appendChild(top);
+    var f = h('div', 'field'), cv = document.createElement('canvas'); f.appendChild(cv); c.appendChild(f);
+    drawGrid(cv, p.grid, { cs: 18 });
+    if (it.gain != null) c.appendChild(h('div', 'sub', '最少PC内での追加分 +' + pctStr(it.gain, nq) + '%'));
+    c.appendChild(h('div', 'sub', '設置順 ' + p.nOrders + '通り'));
+    var ex = p.exo[it.key];
+    if (ex && ex.length) { var s = h('div', 'seq', arrow(ex[0])); s.title = '設置順の例'; var wrap = h('div'); wrap.appendChild(h('div', 'sub', '設置順の例')); wrap.appendChild(s); c.appendChild(wrap); }
+    var eq = p.ex[it.key];
+    if (eq && eq.length) { var w2 = h('div'); w2.appendChild(h('div', 'sub', '取れるミノ順の例')); w2.appendChild(chips(eq.slice(0, 4))); c.appendChild(w2); }
+    return c;
+  }
+
+  function fold(title, node) {
+    var d = h('details', 'fold'), s = h('summary', null, title), b = h('div', 'foldbody');
+    b.appendChild(node); d.appendChild(s); d.appendChild(b); return d;
+  }
+  function hdLine(el, pct, count, nq, extra) {
+    var d = h('div', 'sub2'); d.appendChild(document.createTextNode('ハードドロップのみ: '));
+    d.appendChild(h('b', null, pct.toFixed(2) + '%')); d.appendChild(document.createTextNode('(' + nq + '通り中 ' + count + '通り)' + (extra || ''))); el.appendChild(d);
+  }
+  function oneSetup(el, r, name, compact) {
+    if (r.error) { el.appendChild(h('p', 'errmsg', r.error)); return; }
+    if (compact) { var top = h('div', 'top'); top.appendChild(h('b', null, '地形' + name)); top.appendChild(h('span', 'pct', r.pct.toFixed(2) + '%')); el.appendChild(top); meter(el, r.pct); }
+    else bigPct(el, r.pct);
+    kpi(el, [['並び', r.nq + '通り中 ' + r.count + '通り'], ['組み立て順', r.nOrders + '通り']].concat(compact ? [] : [['計算', (r.ms / 1000).toFixed(2) + '秒']]));
+    hdLine(el, r.pctHd, r.countHd, r.nq, '・ 組み立て順 ' + r.nOrdersHd + '通り');
+    var note = (r.lenient ? '使わないミノは地形の外側で処理できるものとして数えています。' : '使わないミノも先頭から順に置く必要があるものとして数えています(ホールドに入れられるのは1つだけです)。');
+    if (r.hold) note = '初期ホールドは' + r.hold + 'です。' + note;
+    if (r.reserve) note = r.reserve + 'ミノをホールドに残す条件です。' + r.reserve + 'が来た時点でホールドに入れ、以後ホールドは使えません(組み終えた後に' + r.reserve + 'が来る並びは影響しません)。' + note;
+    var np = h('p', 'modeinfo', note); np.style.margin = '0';
+    el.appendChild(fold('備考(設定)', np));
+    if (!r.nOrders) {
+      var why = r.diag.filter(function (d) { return !d.last; }).map(function (d) { return d.t; });
+      el.appendChild(h('p', 'warn', why.length ? why.join('・') + 'ミノは、他のミノをすべて置いた状態でも、描いた位置に到達して置けません(空中設置になるか、操作が届きません)。' : '各ミノは単独では置けますが、どの順番で置いても途中で置けなくなります。'));
+      return;
+    }
+    var wrap = h('div'); wrap.style.marginTop = '10px';
+    wrap.appendChild(h('div', 'label', '組み立てる地形'));
+    var f = h('div', 'pcard'); f.style.marginTop = '6px'; f.style.display = 'inline-grid'; f.style.maxWidth = '100%';
+    var fld = h('div', 'field'), cv = document.createElement('canvas'); fld.appendChild(cv); f.appendChild(fld);
+    var rowsArr = r.grid.slice();
+    drawGrid(cv, rowsArr, { cs: compact ? 18 : 22, rows: Math.max(rowsArr.length, 3) });
+    f.appendChild(h('div', 'seq', '組み立て順の例: ' + arrow(r.bestOrder)));
+    wrap.appendChild(f); el.appendChild(wrap);
+    if (!compact) examples(el, r);
+  }
+  function examples(el, r) {
+    var ex = h('div');
+    if (r.okEx.length) { ex.appendChild(h('div', 'label', '組み立てられるミノ順の例')); ex.appendChild(chips(r.okEx)); }
+    if (r.ngEx.length) { var g = h('div'); g.style.marginTop = '10px'; g.appendChild(h('div', 'label', '組み立てられないミノ順の例')); g.appendChild(chips(r.ngEx)); ex.appendChild(g); }
+    if (ex.children.length) el.appendChild(fold('ミノ順の例', ex));
+  }
+  var tsdExcluded = new Set();
+  function noCompNote(cov, nq, partial) {
+    return '補完が取れません。(見つかった地形の合計でカバーできるのは全体の' + pctStr(cov, nq) + '%で、100%になりません' + (partial ? '。探索が途中なので、続きを探索すると取れる可能性があります' : '') + ')';
+  }
+  function stdNote(res) {
+    return '最少TSDの合計カバー率は ' + pctStr(res.covered, res.nq) + '%(見つかった全地形の合計と同じ)です。' + (res.covered < res.nq ? '100%にならないのは、どの地形でもTSDを組めないミノ順があるためです' + (res.partial ? '(探索が途中なので、続きを探索すると増えることがあります)' : '') + '。' : '');
+  }
+  function tsdCard(it, nq, check) {
+    var c = h('div', 'tcard'), f = h('div', 'field'), cv = document.createElement('canvas'); f.appendChild(cv);
+    drawGrid(cv, it.grid, { cs: 20 });
+    c.appendChild(f); c.appendChild(h('span', 'pct', pctStr(it.cov, nq) + '%'));
+    if (it.alts && (it.alts.length > 1 || it.own !== it.cov)) {
+      var k = 0, info = h('div', 'sub'); info.style.cssText = 'font-size:12px;color:var(--muted);line-height:1.5';
+      var setInfo = function () { info.textContent = 'この色分けだけで組む確率 ' + pctStr(it.alts[k].own, nq) + '%(上の値は、同じ形の別の色分けも含めた確率)'; };
+      setInfo(); c.appendChild(info);
+      if (it.alts.length > 1) {
+        var sw = h('button', 'btn', ''); sw.type = 'button'; sw.style.justifySelf = 'start';
+        var setSw = function () { sw.textContent = '別の循環を見る(' + (k + 1) + '/' + it.alts.length + ')'; };
+        setSw();
+        sw.addEventListener('click', function () { k = (k + 1) % it.alts.length; drawGrid(cv, it.alts[k].grid, { cs: 20 }); scaleCanvases(); setInfo(); setSw(); });
+        c.appendChild(sw);
+      }
+    }
+    if (check) {
+      var lb = h('label', 'check'); lb.style.margin = '0'; var cb = document.createElement('input'); cb.type = 'checkbox'; cb.dataset.id = String(it.id);
+      cb.addEventListener('change', updExcl);
+      lb.appendChild(cb); lb.appendChild(h('span', null, '最少TSDに含めない')); c.appendChild(lb);
+    }
+    return c;
+  }
+  function updExcl() {
+    var b = $('tsdminbtn'); if (!b) return;
+    var n = document.querySelectorAll('#tsdmin input[type=checkbox]:checked').length;
+    b.textContent = 'チェックした地形(' + n + ')を除いて最少TSDを求める' + (tsdExcluded.size ? ' ・ 除外済み ' + tsdExcluded.size : '');
+  }
+  function requestMin(fromBtn) {
+    if (fromBtn === true) document.querySelectorAll('#tsdmin input[type=checkbox]:checked').forEach(function (c) { tsdExcluded.add(parseInt(c.dataset.id, 10)); });
+    if (!worker) { var n = $('tsdminnote'); if (n) n.textContent = '計算用のデータが残っていません。もう一度「TSD地形を探索」を押してください。'; return; }
+    var n2 = $('tsdminnote'); if (n2) n2.textContent = '計算中…';
+    worker.postMessage({ kind: 'tsd-min', exclude: Array.from(tsdExcluded) });
+  }
+  function renderMinResult(r) {
+    var mg = $('tsdmin'), note = $('tsdminnote'); if (!mg || !tsdState) return;
+    mg.innerHTML = '';
+    var res = tsdState.res;
+    if (r.empty) { note.textContent = '補完が取れません。(チェックした地形を除くと、残る地形がありません)'; note.style.fontWeight = '700'; return; }
+    if (r.covered < r.nq) { note.textContent = '補完が取れません。(除外した' + r.excluded + '地形を使わないと、残りの地形の合計は全体の' + pctStr(r.covered, r.nq) + '%で、100%になりません。「除外をすべて解除」で戻せます)'; note.style.fontWeight = '700'; return; }
+    note.style.fontWeight = '';
+    if (!r.excluded) { note.textContent = stdNote(res); }
+    r.ids.forEach(function (id) { var t = res.terrains.filter(function (x) { return x.id === id; })[0]; if (t) mg.appendChild(tsdCard(t, res.nq, true)); });
+    note.textContent = r.excluded ? ('除外した' + r.excluded + '地形を使わない場合の最少TSD(' + r.ids.length + '地形)。この組で全体の' + pctStr(r.covered, r.nq) + '%をカバーします。' + (r.exact ? '' : '(最小とは限りません)')) : stdNote(res);
+    scaleCanvases(); updExcl();
+  }
+  var tsdState = null;
+  function renderTsd(res) {
+    var el = $('res-tsd'); el.className = 'card res on'; el.innerHTML = '';
+    if (res.error) { el.appendChild(h('p', 'errmsg', res.error)); return; }
+    var morebtn = function () {
+      var b = h('button', 'btn primary', '続きを探索(さらに500地形まで)'); b.type = 'button'; b.addEventListener('click', moreTsd); b.style.marginTop = '12px'; return b;
+    };
+    if (!res.terrains.length) {
+      if (res.partial) { el.appendChild(h('p', 'empty', res.partial.why + 'ため、まだ1地形も見つかっていません。探索は途中です。')); el.appendChild(morebtn()); }
+      else el.appendChild(h('p', 'empty', 'この地形から6ミノを置いて、Tをホールドしたまま TSD を撃てる地形は見つかりませんでした。'));
+      return;
+    }
+    tsdState = { res: res, shown: 0 };
+    if (res.partial) el.appendChild(h('p', 'errmsg', res.partial.why + 'ため、探索は途中です(全候補ではありません)。各地形の確率は正確ですが、最少TSDは見つかった地形の中での結果です。「続きを探索」で、前回の続きから探します。'));
+    el.appendChild(viewToggle()); applyCompact();
+    el.appendChild(h('div', 'sect', res.partial ? '最少TSD(途中結果)' : '最少TSD'));
+    var mg = h('div', 'tsdcards'); mg.id = 'tsdmin';
+    var complete = res.covered >= res.nq;
+    if (complete) res.min.idx.forEach(function (i) { mg.appendChild(tsdCard(res.terrains[i], res.nq, true)); });
+    el.appendChild(mg);
+    var mn = h('p', 'modeinfo', complete ? stdNote(res) : noCompNote(res.covered, res.nq, res.partial)); mn.id = 'tsdminnote'; mn.style.margin = '6px 0 0';
+    if (!complete) mn.style.fontWeight = '700';
+    if (complete) {
+      var mrow = h('div', 'row'); mrow.style.margin = '10px 0 0';
+      var mb = h('button', 'btn', ''); mb.type = 'button'; mb.id = 'tsdminbtn'; mb.addEventListener('click', function () { requestMin(true); });
+      var cl = h('button', 'btn', '除外をすべて解除'); cl.type = 'button';
+      cl.addEventListener('click', function () { tsdExcluded.clear(); renderMinResult({ ids: res.min.idx.map(function (i) { return res.terrains[i].id; }), covered: res.covered, nq: res.nq, excluded: 0 }); });
+      mrow.appendChild(mb); mrow.appendChild(cl); el.appendChild(mrow);
+    }
+    el.appendChild(mn);
+    updExcl();
+    el.appendChild(h('div', 'sect', 'TSD地形 ' + res.terrains.length + '通り' + (res.partial ? '(途中結果・' : '(') + '確率の高い順)'));
+    var lg = h('div', 'tsdcards'); lg.id = 'tsdlist'; el.appendChild(lg);
+    var more = h('button', 'btn more'); more.type = 'button'; more.id = 'tsdmore'; more.addEventListener('click', tsdAppend); el.appendChild(more);
+    tsdAppend();
+    if (res.partial) el.appendChild(morebtn());
+    if (tsdExcluded.size) requestMin();
+  }
+  function tsdAppend() {
+    var r = tsdState.res, end = Math.min(r.terrains.length, tsdState.shown + 24), list = $('tsdlist');
+    for (var i = tsdState.shown; i < end; i++) list.appendChild(tsdCard(r.terrains[i], r.nq, false));
+    tsdState.shown = end; scaleCanvases(); var m = $('tsdmore'); m.style.display = end < r.terrains.length ? '' : 'none';
+    m.textContent = 'さらに表示(残り ' + (r.terrains.length - end) + '件)';
+  }
+
+  function renderSetup(res) {
+    var el = $('res-setup'); el.className = 'card res on'; el.innerHTML = '';
+    var items = res.items;
+    if (items.length === 1) {
+      el.appendChild(h('h2', null, 'セットアップ率(地形' + items[0].name + ')'));
+      oneSetup(el, items[0].res, items[0].name, false); return;
+    }
+    el.appendChild(h('h2', null, 'セットアップ率(どれか1つ以上)'));
+    if (res.none) { items.forEach(function (it) { el.appendChild(h('p', 'errmsg', '地形' + it.name + ': ' + it.res.error)); }); return; }
+    var good = items.filter(function (it) { return it.res.ok; });
+    bigPct(el, res.pct);
+    kpi(el, [['地形', good.map(function (i) { return i.name; }).join(' / ')], ['並び', res.nq + '通り中 ' + res.count + '通り'], ['2つ以上で組める並び', res.multi + '通り'], ['計算', (res.ms / 1000).toFixed(2) + '秒']]);
+    meter(el, res.pct);
+    hdLine(el, res.pctHd, res.countHd, res.nq, '');
+    var best = Math.max.apply(null, good.map(function (i) { return i.res.pct; }));
+    el.appendChild(h('p', 'modeinfo', '最も高い単独の地形より +' + (res.pct - best).toFixed(2) + '% 上積みされます。'));
+    var list = h('div', 'plist'); list.style.marginTop = '12px';
+    items.forEach(function (it) {
+      var c = h('div', 'pcard'); oneSetup(c, it.res, it.name, true);
+      if (it.res.ok) {
+        var d = h('div', 'modeinfo'); d.style.margin = '0';
+        d.appendChild(document.createTextNode('地形' + it.name + 'を抜くと '));
+        var bb = h('b', null, (it.drop ? '-' : '') + (it.drop / res.nq * 100).toFixed(2) + '%'); bb.style.color = it.drop ? 'var(--err)' : 'var(--ink)'; d.appendChild(bb);
+        d.appendChild(document.createTextNode(' (合算 ' + ((res.count - it.drop) / res.nq * 100).toFixed(2) + '%、' + it.drop + '通り減る)。ハードドロップのみでは ' + (it.dropHd ? '-' : '') + (it.dropHd / res.nq * 100).toFixed(2) + '%'));
+        c.insertBefore(d, c.children[1] || null);
+      }
+      list.appendChild(c);
+    });
+    el.appendChild(list);
+    examples(el, res);
+  }
+
+  renderTabs();
+  renderHolds();
+  var startPage = 'pc';
+  try { var sp = localStorage.getItem('pc-tool-page'); startPage = (sp === 'tsd' || sp === 'setup') ? sp : 'pc'; } catch (e) {}
+  redrawEditor();
+  showPage(startPage);
+})();
+</script>
+
+</body></html>
